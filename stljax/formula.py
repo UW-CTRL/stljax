@@ -51,20 +51,22 @@ def gmsr_min_turbo(signal, eps, p, weights=None, axis=1, keepdims=True):
     pos_idx = signal > 0.0
     neg_idx = ~pos_idx
 
-    return jnp.where(neg_idx.sum(axis, keepdims=keepdims) > 0,
-                        eps**0.5
-                        - Mp(
-                            bar_minus(signal, 2),
-                            eps,
-                            p,
-                            weights=weights,
-                            axis=axis,
-                            keepdims=keepdims,
-                        ) ** 0.5,
-                        M0(bar_plus(signal, 2), eps, weights=weights, axis=axis, keepdims=keepdims)
-                        ** 0.5
-                        - eps**0.5
-                        )
+    return jnp.where(
+        neg_idx.sum(axis, keepdims=keepdims) > 0,
+        eps**0.5
+        - Mp(
+            bar_minus(signal, 2),
+            eps,
+            p,
+            weights=weights,
+            axis=axis,
+            keepdims=keepdims,
+        )
+        ** 0.5,
+        M0(bar_plus(signal, 2), eps, weights=weights, axis=axis, keepdims=keepdims)
+        ** 0.5
+        - eps**0.5,
+    )
 
 
 def gmsr_max_turbo(signal, eps, p, weights=None, axis=1, keepdims=True):
