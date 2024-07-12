@@ -4,7 +4,43 @@ import warnings
 warnings.simplefilter("default")
 
 
+def gmsr_min(signal, eps, p):
+    # TODO: (norrisg) allow `axis` specification
 
+    # Split indices into positive and non-positive values
+    pos_idx = signal > 0.0
+    neg_idx = ~pos_idx
+
+    weights = jnp.ones_like(signal)
+
+    # Extract values and weights for positive and non-positive indices
+    pos_vals = signal[pos_idx]
+    neg_vals = signal[neg_idx]
+    pos_w = weights[pos_idx]
+    neg_w = weights[neg_idx]
+
+    # Sum of all weights
+    sum_w = weights.sum()
+
+    # If there exists a negative element
+    if neg_vals.size > 0:
+        sums = 0.0
+        sums = jnp.sum(neg_w * (neg_vals ** (2 * p)))
+        Mp = (eps**p + (sums / sum_w)) ** (1 / p)
+        h_min = eps**0.5 - Mp**0.5
+
+    # If all values are positive
+    else:
+        mult = 1.0
+        mult = jnp.prod(pos_vals ** (2 * pos_w))
+        M0 = (eps**sum_w + mult) ** (1 / sum_w)
+        h_min = M0**0.5 - eps**0.5
+
+    return jnp.reshape(h_min, (1, 1, 1))
+
+
+def gmsr_max(signal, eps, p):
+    return -gmsr_min(-signal, eps, p)
 
 
 def maxish(signal, axis, keepdims=True, approx_method="true", temperature=None):
@@ -26,7 +62,12 @@ def maxish(signal, axis, keepdims=True, approx_method="true", temperature=None):
     if approx_method == "softmax":
         assert temperature is not None, "need a temperature value"
         return (jax.nn.softmax(temperature * signal, axis) * signal).sum(axis, keepdims=keepdims)
-    
+
+    if approx_method == "gmsr":
+        assert temperature is not None, "temperature tuple containing (eps, p) is required"
+        (eps, p) = temperature
+        return gmsr_max(signal, eps, p)
+
 
 def minish(signal, axis, keepdims=True, approx_method="true", temperature=None):
     return -maxish(-signal, axis, keepdims, approx_method, temperature)
