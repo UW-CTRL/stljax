@@ -80,7 +80,9 @@ def gmsr_max_fast(signal, eps, p):
 
 def maxish(signal, axis, keepdims=True, approx_method="true", temperature=None):
     if isinstance(signal, Expression):
-        assert signal.value is not None, "Input Expression does not have numerical values"
+        assert (
+            signal.value is not None
+        ), "Input Expression does not have numerical values"
         signal = signal.value
 
     match approx_method:
