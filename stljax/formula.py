@@ -45,6 +45,38 @@ def gmsr_max(signal, eps, p, weights=None, axis=1, keepdims=True):
     return -gmsr_min(-signal, eps, p, weights=weights, axis=axis, keepdims=keepdims)
 
 
+def gmsr_min_turbo(signal, eps, p, weights=None, axis=1, keepdims=True):
+    pos_idx = signal > 0.0
+    neg_idx = ~pos_idx
+
+    if signal[neg_idx].size > 0:
+        h_min = (
+            eps**0.5
+            - Mp(
+                bar_minus(signal, 2),
+                eps,
+                p,
+                weights=weights,
+                axis=axis,
+                keepdims=keepdims,
+            )
+            ** 0.5
+        )
+    else:
+        h_min = (
+            M0(bar_plus(signal, 2), eps, weights=weights, axis=axis, keepdims=keepdims)
+            ** 0.5
+            - eps**0.5
+        )
+    return h_min
+
+
+def gmsr_max_turbo(signal, eps, p, weights=None, axis=1, keepdims=True):
+    return -gmsr_min_turbo(
+        -signal, eps, p, weights=weights, axis=axis, keepdims=keepdims
+    )
+
+
 def gmsr_min_fast(signal, eps, p):
     # TODO: (norrisg) allow `axis` specification
 
@@ -113,7 +145,7 @@ def maxish(signal, axis, keepdims=True, approx_method="true", temperature=None):
                 temperature is not None
             ), "temperature tuple containing (eps, p) is required"
             (eps, p) = temperature
-            return gmsr_max(signal, eps, p, axis=axis, keepdims=keepdims)
+            return gmsr_max_turbo(signal, eps, p, axis=axis, keepdims=keepdims)
 
         case _:
             raise ValueError("Invalid approx_method")
