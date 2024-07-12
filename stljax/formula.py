@@ -4,10 +4,12 @@ import warnings
 warnings.simplefilter("default")
 
 
+@jax.jit
 def bar_plus(signal, p=2):
     return jax.nn.relu(signal) ** p
 
 
+@jax.jit
 def bar_minus(signal, p=2):
     return (-jax.nn.relu(-signal)) ** p
 
@@ -15,7 +17,7 @@ def bar_minus(signal, p=2):
 def M0(signal, eps, weights=None, axis=1, keepdims=True):
     if weights is None:
         weights = jnp.ones_like(signal)
-    sum_w = weights.sum(axis)
+    sum_w = weights.sum(axis, keepdims=True)
     return (
         eps**sum_w + jnp.prod(signal**weights, axis=axis, keepdims=keepdims)
     ) ** (1 / sum_w)
@@ -24,7 +26,7 @@ def M0(signal, eps, weights=None, axis=1, keepdims=True):
 def Mp(signal, eps, p, weights=None, axis=1, keepdims=True):
     if weights is None:
         weights = jnp.ones_like(signal)
-    sum_w = weights.sum(axis)
+    sum_w = weights.sum(axis, keepdims=True)
     return (
         eps**p + 1 / sum_w * jnp.sum(weights * signal**p, axis=axis, keepdims=keepdims)
     ) ** (1 / p)
@@ -49,26 +51,20 @@ def gmsr_min_turbo(signal, eps, p, weights=None, axis=1, keepdims=True):
     pos_idx = signal > 0.0
     neg_idx = ~pos_idx
 
-    if signal[neg_idx].size > 0:
-        h_min = (
-            eps**0.5
-            - Mp(
-                bar_minus(signal, 2),
-                eps,
-                p,
-                weights=weights,
-                axis=axis,
-                keepdims=keepdims,
-            )
-            ** 0.5
-        )
-    else:
-        h_min = (
-            M0(bar_plus(signal, 2), eps, weights=weights, axis=axis, keepdims=keepdims)
-            ** 0.5
-            - eps**0.5
-        )
-    return h_min
+    return jnp.where(neg_idx.sum(axis, keepdims=keepdims) > 0,
+                        eps**0.5
+                        - Mp(
+                            bar_minus(signal, 2),
+                            eps,
+                            p,
+                            weights=weights,
+                            axis=axis,
+                            keepdims=keepdims,
+                        ) ** 0.5,
+                        M0(bar_plus(signal, 2), eps, weights=weights, axis=axis, keepdims=keepdims)
+                        ** 0.5
+                        - eps**0.5
+                        )
 
 
 def gmsr_max_turbo(signal, eps, p, weights=None, axis=1, keepdims=True):
