@@ -42,25 +42,38 @@ def maxish(signal, axis, keepdims=True, approx_method="true", temperature=None):
         assert signal.value is not None, "Input Expression does not have numerical values"
         signal = signal.value
 
-    if approx_method == "true":
-        '''jax keeps track of multiple max values and will distribute the gradients across all max values!
-        e.g., jax.grad(jnp.max)(jnp.array([0.01, 0.0, 0.01])) # --> Array([0.5, 0. , 0.5], dtype=float32)
-        '''
-        return jnp.max(signal, axis, keepdims=keepdims)
-    
-    if approx_method == "logsumexp":
-        '''https://jax.readthedocs.io/en/latest/_autosummary/jax.scipy.special.logsumexp.html'''
-        assert temperature is not None, "need a temperature value"
-        return jax.scipy.special.logsumexp(temperature * signal, axis=axis, keepdims=keepdims) / temperature
-    
-    if approx_method == "softmax":
-        assert temperature is not None, "need a temperature value"
-        return (jax.nn.softmax(temperature * signal, axis) * signal).sum(axis, keepdims=keepdims)
+    match approx_method:
+        case "true":
+            """jax keeps track of multiple max values and will distribute the gradients across all max values!
+            e.g., jax.grad(jnp.max)(jnp.array([0.01, 0.0, 0.01])) # --> Array([0.5, 0. , 0.5], dtype=float32)
+            """
+            return jnp.max(signal, axis, keepdims=keepdims)
 
-    if approx_method == "gmsr":
-        assert temperature is not None, "temperature tuple containing (eps, p) is required"
-        (eps, p) = temperature
-        return gmsr_max(signal, eps, p)
+        case "logsumexp":
+            """https://jax.readthedocs.io/en/latest/_autosummary/jax.scipy.special.logsumexp.html"""
+            assert temperature is not None, "need a temperature value"
+            return (
+                jax.scipy.special.logsumexp(
+                    temperature * signal, axis=axis, keepdims=keepdims
+                )
+                / temperature
+            )
+
+        case "softmax":
+            assert temperature is not None, "need a temperature value"
+            return (jax.nn.softmax(temperature * signal, axis) * signal).sum(
+                axis, keepdims=keepdims
+            )
+
+        case "gmsr":
+            assert (
+                temperature is not None
+            ), "temperature tuple containing (eps, p) is required"
+            (eps, p) = temperature
+            return gmsr_max(signal, eps, p)
+
+        case _:
+            raise ValueError("Invalid approx_method")
 
 
 def minish(signal, axis, keepdims=True, approx_method="true", temperature=None):
