@@ -13,26 +13,20 @@ def gmsr_min(signal, eps, p):
 
     weights = jnp.ones_like(signal)
 
-    # Extract values and weights for positive and non-positive indices
-    pos_vals = signal[pos_idx]
-    neg_vals = signal[neg_idx]
-    pos_w = weights[pos_idx]
-    neg_w = weights[neg_idx]
-
     # Sum of all weights
     sum_w = weights.sum()
 
     # If there exists a negative element
-    if neg_vals.size > 0:
+    if signal[neg_idx].size > 0:
         sums = 0.0
-        sums = jnp.sum(neg_w * (neg_vals ** (2 * p)))
+        sums = jnp.sum(weights[neg_idx] * (signal[neg_idx] ** (2 * p)))
         Mp = (eps**p + (sums / sum_w)) ** (1 / p)
         h_min = eps**0.5 - Mp**0.5
 
     # If all values are positive
     else:
         mult = 1.0
-        mult = jnp.prod(pos_vals ** (2 * pos_w))
+        mult = jnp.prod(signal[pos_idx] ** (2 * weights[pos_idx]))
         M0 = (eps**sum_w + mult) ** (1 / sum_w)
         h_min = M0**0.5 - eps**0.5
 
