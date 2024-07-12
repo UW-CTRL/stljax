@@ -4,7 +4,48 @@ import warnings
 warnings.simplefilter("default")
 
 
-def gmsr_min(signal, eps, p):
+def bar_plus(signal, p=2):
+    return jax.nn.relu(signal) ** p
+
+
+def bar_minus(signal, p=2):
+    return (-jax.nn.relu(-signal)) ** p
+
+
+def M0(signal, eps, weights=None, axis=1, keepdims=True):
+    if weights is None:
+        weights = jnp.ones_like(signal)
+    sum_w = weights.sum(axis)
+    return (
+        eps**sum_w + jnp.prod(signal**weights, axis=axis, keepdims=keepdims)
+    ) ** (1 / sum_w)
+
+
+def Mp(signal, eps, p, weights=None, axis=1, keepdims=True):
+    if weights is None:
+        weights = jnp.ones_like(signal)
+    sum_w = weights.sum(axis)
+    return (
+        eps**p + 1 / sum_w * jnp.sum(weights * signal**p, axis=axis, keepdims=keepdims)
+    ) ** (1 / p)
+
+
+def gmsr_min(signal, eps, p, weights=None, axis=1, keepdims=True):
+    return (
+        M0(bar_plus(signal, 2), eps, weights=weights, axis=axis, keepdims=keepdims)
+        ** 0.5
+        - Mp(
+            bar_minus(signal, 2), eps, p, weights=weights, axis=axis, keepdims=keepdims
+        )
+        ** 0.5
+    )
+
+
+def gmsr_max(signal, eps, p, weights=None, axis=1, keepdims=True):
+    return -gmsr_min(-signal, eps, p, weights=weights, axis=axis, keepdims=keepdims)
+
+
+def gmsr_min_fast(signal, eps, p):
     # TODO: (norrisg) allow `axis` specification
 
     # Split indices into positive and non-positive values
@@ -33,8 +74,8 @@ def gmsr_min(signal, eps, p):
     return jnp.reshape(h_min, (1, 1, 1))
 
 
-def gmsr_max(signal, eps, p):
-    return -gmsr_min(-signal, eps, p)
+def gmsr_max_fast(signal, eps, p):
+    return -gmsr_min_fast(-signal, eps, p)
 
 
 def maxish(signal, axis, keepdims=True, approx_method="true", temperature=None):
@@ -70,7 +111,7 @@ def maxish(signal, axis, keepdims=True, approx_method="true", temperature=None):
                 temperature is not None
             ), "temperature tuple containing (eps, p) is required"
             (eps, p) = temperature
-            return gmsr_max(signal, eps, p)
+            return gmsr_max(signal, eps, p, axis=axis, keepdims=keepdims)
 
         case _:
             raise ValueError("Invalid approx_method")
