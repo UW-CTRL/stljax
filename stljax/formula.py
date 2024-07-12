@@ -72,7 +72,6 @@ def maxish(signal, axis, keepdims=True, approx_method="true", temperature=None):
 def minish(signal, axis, keepdims=True, approx_method="true", temperature=None):
     return -maxish(-signal, axis, keepdims, approx_method, temperature)
 
-    
 
 class STL_Formula:
 
@@ -191,7 +190,7 @@ class LessThan(STL_Formula):
             return lhs_str + " < " + str(self.val)
         # if self.value is a single number (e.g., int, or float)
         return lhs_str + " < " + str(self.val)
-    
+
 class GreaterThan(STL_Formula):
     """
     The GreaterThan predicate  (signal) > c 
@@ -235,8 +234,7 @@ class GreaterThan(STL_Formula):
             return lhs_str + " > " + str(self.val)
         # if self.value is a single number (e.g., int, or float)
         return lhs_str + " > " + str(self.val)
-    
-    
+
 
 class Equal(STL_Formula):
     """
@@ -281,8 +279,8 @@ class Equal(STL_Formula):
             return lhs_str + " == " + str(jax.Array)
         # if self.value is a single number (e.g., int, or float)
         return lhs_str + " == " + str(self.val)
-    
-    
+
+
 class Negation(STL_Formula):
     """
     The Negation STL formula ¬
@@ -347,7 +345,7 @@ class And(STL_Formula):
 
     def __str__(self):
         return "(" + str(self.subformula1) + ") ∧ (" + str(self.subformula2) + ")"
-    
+
 
 class Or(STL_Formula):
     """
@@ -387,7 +385,7 @@ class Or(STL_Formula):
 
     def __str__(self):
         return "(" + str(self.subformula1) + ") ∨ (" + str(self.subformula2) + ")"
-    
+
 class Temporal_Operator(STL_Formula):
     """
     Class to compute Eventually and Always. This builds a recurrent cell to perform dynamic programming
@@ -484,7 +482,6 @@ class Temporal_Operator(STL_Formula):
     def _next_function(self):
         """ next function is the input subformula. For visualization purposes """
         return [self.subformula]
-
 
 
 class Always(Temporal_Operator):
@@ -684,7 +681,6 @@ class Expression:
     
     def __call__(self):
         return self.value
-
 
 
 def convert_to_input_values(inputs):
