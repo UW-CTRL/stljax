@@ -4,34 +4,155 @@ import warnings
 warnings.simplefilter("default")
 
 
+@jax.jit
+def bar_plus(signal, p=2):
+    return jax.nn.relu(signal) ** p
 
+
+@jax.jit
+def bar_minus(signal, p=2):
+    return (-jax.nn.relu(-signal)) ** p
+
+
+def M0(signal, eps, weights=None, axis=1, keepdims=True):
+    if weights is None:
+        weights = jnp.ones_like(signal)
+    sum_w = weights.sum(axis, keepdims=True)
+    return (
+        eps**sum_w + jnp.prod(signal**weights, axis=axis, keepdims=keepdims)
+    ) ** (1 / sum_w)
+
+
+def Mp(signal, eps, p, weights=None, axis=1, keepdims=True):
+    if weights is None:
+        weights = jnp.ones_like(signal)
+    sum_w = weights.sum(axis, keepdims=True)
+    return (
+        eps**p + 1 / sum_w * jnp.sum(weights * signal**p, axis=axis, keepdims=keepdims)
+    ) ** (1 / p)
+
+
+def gmsr_min(signal, eps, p, weights=None, axis=1, keepdims=True):
+    return (
+        M0(bar_plus(signal, 2), eps, weights=weights, axis=axis, keepdims=keepdims)
+        ** 0.5
+        - Mp(
+            bar_minus(signal, 2), eps, p, weights=weights, axis=axis, keepdims=keepdims
+        )
+        ** 0.5
+    )
+
+
+def gmsr_max(signal, eps, p, weights=None, axis=1, keepdims=True):
+    return -gmsr_min(-signal, eps, p, weights=weights, axis=axis, keepdims=keepdims)
+
+
+def gmsr_min_turbo(signal, eps, p, weights=None, axis=1, keepdims=True):
+    # TODO: (norrisg) make actually turbo (faster than normal `gmsr_min`)
+    pos_idx = signal > 0.0
+    neg_idx = ~pos_idx
+
+    return jnp.where(
+        neg_idx.sum(axis, keepdims=keepdims) > 0,
+        eps**0.5
+        - Mp(
+            bar_minus(signal, 2),
+            eps,
+            p,
+            weights=weights,
+            axis=axis,
+            keepdims=keepdims,
+        )
+        ** 0.5,
+        M0(bar_plus(signal, 2), eps, weights=weights, axis=axis, keepdims=keepdims)
+        ** 0.5
+        - eps**0.5,
+    )
+
+
+def gmsr_max_turbo(signal, eps, p, weights=None, axis=1, keepdims=True):
+    return -gmsr_min_turbo(
+        -signal, eps, p, weights=weights, axis=axis, keepdims=keepdims
+    )
+
+
+def gmsr_min_fast(signal, eps, p):
+    # TODO: (norrisg) allow `axis` specification
+
+    # Split indices into positive and non-positive values
+    pos_idx = signal > 0.0
+    neg_idx = ~pos_idx
+
+    weights = jnp.ones_like(signal)
+
+    # Sum of all weights
+    sum_w = weights.sum()
+
+    # If there exists a negative element
+    if signal[neg_idx].size > 0:
+        sums = 0.0
+        sums = jnp.sum(weights[neg_idx] * (signal[neg_idx] ** (2 * p)))
+        Mp = (eps**p + (sums / sum_w)) ** (1 / p)
+        h_min = eps**0.5 - Mp**0.5
+
+    # If all values are positive
+    else:
+        mult = 1.0
+        mult = jnp.prod(signal[pos_idx] ** (2 * weights[pos_idx]))
+        M0 = (eps**sum_w + mult) ** (1 / sum_w)
+        h_min = M0**0.5 - eps**0.5
+
+    return jnp.reshape(h_min, (1, 1, 1))
+
+
+def gmsr_max_fast(signal, eps, p):
+    return -gmsr_min_fast(-signal, eps, p)
 
 
 def maxish(signal, axis, keepdims=True, approx_method="true", temperature=None):
     if isinstance(signal, Expression):
-        assert signal.value is not None, "Input Expression does not have numerical values"
+        assert (
+            signal.value is not None
+        ), "Input Expression does not have numerical values"
         signal = signal.value
 
-    if approx_method == "true":
-        '''jax keeps track of multiple max values and will distribute the gradients across all max values!
-        e.g., jax.grad(jnp.max)(jnp.array([0.01, 0.0, 0.01])) # --> Array([0.5, 0. , 0.5], dtype=float32)
-        '''
-        return jnp.max(signal, axis, keepdims=keepdims)
-    
-    if approx_method == "logsumexp":
-        '''https://jax.readthedocs.io/en/latest/_autosummary/jax.scipy.special.logsumexp.html'''
-        assert temperature is not None, "need a temperature value"
-        return jax.scipy.special.logsumexp(temperature * signal, axis=axis, keepdims=keepdims) / temperature
-    
-    if approx_method == "softmax":
-        assert temperature is not None, "need a temperature value"
-        return (jax.nn.softmax(temperature * signal, axis) * signal).sum(axis, keepdims=keepdims)
-    
+    match approx_method:
+        case "true":
+            """jax keeps track of multiple max values and will distribute the gradients across all max values!
+            e.g., jax.grad(jnp.max)(jnp.array([0.01, 0.0, 0.01])) # --> Array([0.5, 0. , 0.5], dtype=float32)
+            """
+            return jnp.max(signal, axis, keepdims=keepdims)
+
+        case "logsumexp":
+            """https://jax.readthedocs.io/en/latest/_autosummary/jax.scipy.special.logsumexp.html"""
+            assert temperature is not None, "need a temperature value"
+            return (
+                jax.scipy.special.logsumexp(
+                    temperature * signal, axis=axis, keepdims=keepdims
+                )
+                / temperature
+            )
+
+        case "softmax":
+            assert temperature is not None, "need a temperature value"
+            return (jax.nn.softmax(temperature * signal, axis) * signal).sum(
+                axis, keepdims=keepdims
+            )
+
+        case "gmsr":
+            assert (
+                temperature is not None
+            ), "temperature tuple containing (eps, p) is required"
+            (eps, p) = temperature
+            return gmsr_max(signal, eps, p, axis=axis, keepdims=keepdims)
+
+        case _:
+            raise ValueError("Invalid approx_method")
+
 
 def minish(signal, axis, keepdims=True, approx_method="true", temperature=None):
     return -maxish(-signal, axis, keepdims, approx_method, temperature)
 
-    
 
 class STL_Formula:
 
@@ -150,7 +271,7 @@ class LessThan(STL_Formula):
             return lhs_str + " < " + str(self.val)
         # if self.value is a single number (e.g., int, or float)
         return lhs_str + " < " + str(self.val)
-    
+
 class GreaterThan(STL_Formula):
     """
     The GreaterThan predicate  (signal) > c 
@@ -194,8 +315,7 @@ class GreaterThan(STL_Formula):
             return lhs_str + " > " + str(self.val)
         # if self.value is a single number (e.g., int, or float)
         return lhs_str + " > " + str(self.val)
-    
-    
+
 
 class Equal(STL_Formula):
     """
@@ -240,8 +360,8 @@ class Equal(STL_Formula):
             return lhs_str + " == " + str(jax.Array)
         # if self.value is a single number (e.g., int, or float)
         return lhs_str + " == " + str(self.val)
-    
-    
+
+
 class Negation(STL_Formula):
     """
     The Negation STL formula ¬
@@ -306,7 +426,7 @@ class And(STL_Formula):
 
     def __str__(self):
         return "(" + str(self.subformula1) + ") ∧ (" + str(self.subformula2) + ")"
-    
+
 
 class Or(STL_Formula):
     """
@@ -346,7 +466,7 @@ class Or(STL_Formula):
 
     def __str__(self):
         return "(" + str(self.subformula1) + ") ∨ (" + str(self.subformula2) + ")"
-    
+
 class Temporal_Operator(STL_Formula):
     """
     Class to compute Eventually and Always. This builds a recurrent cell to perform dynamic programming
@@ -443,7 +563,6 @@ class Temporal_Operator(STL_Formula):
     def _next_function(self):
         """ next function is the input subformula. For visualization purposes """
         return [self.subformula]
-
 
 
 class Always(Temporal_Operator):
@@ -643,7 +762,6 @@ class Expression:
     
     def __call__(self):
         return self.value
-
 
 
 def convert_to_input_values(inputs):
