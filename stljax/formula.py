@@ -48,6 +48,7 @@ def gmsr_max(signal, eps, p, weights=None, axis=1, keepdims=True):
 
 
 def gmsr_min_turbo(signal, eps, p, weights=None, axis=1, keepdims=True):
+    # TODO: (norrisg) make actually turbo (faster than normal `gmsr_min`)
     pos_idx = signal > 0.0
     neg_idx = ~pos_idx
 
@@ -143,7 +144,7 @@ def maxish(signal, axis, keepdims=True, approx_method="true", temperature=None):
                 temperature is not None
             ), "temperature tuple containing (eps, p) is required"
             (eps, p) = temperature
-            return gmsr_max_turbo(signal, eps, p, axis=axis, keepdims=keepdims)
+            return gmsr_max(signal, eps, p, axis=axis, keepdims=keepdims)
 
         case _:
             raise ValueError("Invalid approx_method")
