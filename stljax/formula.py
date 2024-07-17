@@ -160,7 +160,7 @@ class STL_Formula:
         super(STL_Formula, self).__init__()
 
     def robustness_trace(self, signal, **kwargs):
-        """ Computes the robustness trace of the formula given an input signal. 
+        """ Computes the robustness trace of the formula given an input signal.
         Outputs: tensor [bs, time_dim,...]
         """
         raise NotImplementedError("robustness_trace not yet implemented")
@@ -192,7 +192,7 @@ class STL_Formula:
         Default: time=0 assuming this is the index for the NON-REVERSED trace. But the code will take it from the end since the input signal is TIME REVERSED.
 
         """
-        
+
         """
         Evaluates the robustness_trace given the input. The input is converted to the numerical value first.
         """
@@ -209,11 +209,11 @@ class STL_Formula:
             return self.robustness_trace(convert_to_input_values(signal), **kwargs)
         else:
             raise ValueError("Not a invalid input trace")
-        
+
     def _next_function(self):
         """Function to keep track of the subformulas. For visualization purposes"""
         raise NotImplementedError("_next_function not year implemented")
-    
+
     def __str__(self):
         raise NotImplementedError("__str__ not yet implemented")
 
@@ -227,10 +227,26 @@ class STL_Formula:
     def __invert__(self):
         return Negation(self)
 
+class Identity(STL_Formula):
+    """ The identity formula """
+    def __init__(self, name='x'):
+        super().__init__()
+        self.name = name
+
+    def robustness_trace(self, trace, **kwargs):
+        return trace
+
+    def _next_function(self):
+        return []
+
+    def __str__(self):
+        return "%s" %self.name
+
+
 
 class LessThan(STL_Formula):
     """
-    The LessThan predicate  (signal) < c 
+    The LessThan predicate  (signal) < c
     lhs < val where lhs is a placeholder for a signal, and val is the constant.
     lhs can be a string or an Expression
     val can be a float, int, Expression, or tensor. It cannot be a string.
@@ -245,7 +261,7 @@ class LessThan(STL_Formula):
 
     def robustness_trace(self, trace, predicate_scale=1.0, **kwargs):
         """
-        Computing robustness trace of trace < c 
+        Computing robustness trace of trace < c
         Optional: scale the robustness by a factor predicate_scale. Default: 1.0
         """
         if isinstance(trace, Expression):
@@ -274,7 +290,7 @@ class LessThan(STL_Formula):
 
 class GreaterThan(STL_Formula):
     """
-    The GreaterThan predicate  (signal) > c 
+    The GreaterThan predicate  (signal) > c
     lhs > val where lhs is a placeholder for a signal, and val is the constant.
     lhs can be a string or an Expression
     val can be a float, int, Expression, or tensor. It cannot be a string.
@@ -289,7 +305,7 @@ class GreaterThan(STL_Formula):
 
     def robustness_trace(self, trace, predicate_scale=1.0, **kwargs):
         """
-        Computing robustness trace of trace > c 
+        Computing robustness trace of trace > c
         Optional: scale the robustness by a factor predicate_scale. Default: 1.0
         """
         if isinstance(trace, Expression):
@@ -319,7 +335,7 @@ class GreaterThan(STL_Formula):
 
 class Equal(STL_Formula):
     """
-    The Equal predicate  (signal) == c 
+    The Equal predicate  (signal) == c
     lhs == val where lhs is a placeholder for a signal, and val is the constant.
     lhs can be a string or an Expression
     val can be a float, int, Expression, or tensor. It cannot be a string.
@@ -334,7 +350,7 @@ class Equal(STL_Formula):
 
     def robustness_trace(self, trace, predicate_scale=1.0, **kwargs):
         """
-        Computing robustness trace of trace == c 
+        Computing robustness trace of trace == c
         Optional: scale the robustness by a factor predicate_scale. Default: 1.0
         """
         if isinstance(trace, Expression):
@@ -403,7 +419,7 @@ class And(STL_Formula):
     @staticmethod
     def separate_and(formula, input_, **kwargs):
         """
-        Function of seperate out multiple And operations. e.g., ϕ₁ ∧ ϕ₂ ∧ ϕ₃ ∧ ϕ₄ ∧ ...    
+        Function of seperate out multiple And operations. e.g., ϕ₁ ∧ ϕ₂ ∧ ϕ₃ ∧ ϕ₄ ∧ ...
         """
         if formula.__class__.__name__ != "And":
             return jnp.expand_dims(formula(input_, **kwargs), -1)
@@ -443,7 +459,7 @@ class Or(STL_Formula):
     @staticmethod
     def separate_and(formula, input_, **kwargs):
         """
-        Function of seperate out multiple And operations. e.g., ϕ₁ ∨ ϕ₂ ∨ ϕ₃ ∨ ϕ₄ ∨ ...    
+        Function of seperate out multiple And operations. e.g., ϕ₁ ∨ ϕ₂ ∨ ϕ₃ ∨ ϕ₄ ∨ ...
         """
         if formula.__class__.__name__ != "Or":
             return jnp.expand_dims(formula(input_, **kwargs), -1)
@@ -470,10 +486,10 @@ class Or(STL_Formula):
 class Temporal_Operator(STL_Formula):
     """
     Class to compute Eventually and Always. This builds a recurrent cell to perform dynamic programming
-    
+
     Inputs
     subformula --- The subformula that the temporal operator is applied to.
-    interval   --- The time interval that the temporal operator operates on. 
+    interval   --- The time interval that the temporal operator operates on.
                    Default: None which means [0, jnp.inf]. Other options car be: [a, b] (b < jnp.inf), [a, jnp.inf] (a > 0)
     NOTE: Assume that the interval is describing the INDICES of the desired time interval. The user is responsible for converting the time interval (in time units) into indices (integers) using knowledge of the time step size.
     """
@@ -497,7 +513,7 @@ class Temporal_Operator(STL_Formula):
 
         """
         Compute the initial hidden state.
-        
+
         Input
         signal --- the input signal [batch_size, time_dim, signal_dim]
 
@@ -522,7 +538,7 @@ class Temporal_Operator(STL_Formula):
     def _cell(self, x, hidden_state, time_dim=1, **kwargs):
         """
         This function describes the operation that takes place at each recurrent step.
-        Input: 
+        Input:
         x  --- the input state at time t [batch_size, 1, ...]
         hidden_state --- the hidden state. It is either a tensor, or a tuple of tensors, depending on the interval chosen and other arguments. Generally, the hidden state is of size [batch_size, hidden_dim,...]
         """
@@ -555,7 +571,7 @@ class Temporal_Operator(STL_Formula):
         Function to compute robustness trace of a temporal STL formula
         First, compute the robustness trace of the subformula, and use that as the input for the recurrent computation
         """
-        
+
         trace = self.subformula(inputs, **kwargs)
         outputs, _ = self._run_cell(trace, time_dim, **kwargs)
         return jnp.concatenate(outputs, axis=time_dim)                              # [batch_size, time_dim, ...]
@@ -567,7 +583,7 @@ class Temporal_Operator(STL_Formula):
 
 class Always(Temporal_Operator):
     """
-    The Always STL formula □_[a,b] 
+    The Always STL formula □_[a,b]
     The robustness value is the minimum value of the input trace over a prespecified time interval
 
     Input
@@ -580,11 +596,11 @@ class Always(Temporal_Operator):
     def _cell(self, x, hidden_state, time_dim, **kwargs):
         """
         This function describes the operation that takes place at each recurrent step.
-        Input: 
+        Input:
         x  --- the input state at time t [batch_size, 1, ...]
         hidden_state --- the hidden state is of size [batch_size, rnn_dim,...]
         """
-        
+
         # Case 1, interval = [0, inf]
         if self.interval is None:
             input_ = jnp.concatenate([hidden_state, x], axis=time_dim)                # [batch_size, rnn_dim+1, x_dim]
@@ -598,8 +614,8 @@ class Always(Temporal_Operator):
             output = minish(ch, time_dim, keepdims=True, **kwargs)               # [batch_size, 1, x_dim]
             hidden_state = (output, self.M @ h + self.b * x)
         # Case 2 and 4: self.interval is [a, b]
-        else: 
-            
+        else:
+
             hidden_state = self.M @ hidden_state + self.b * x
             hx = jnp.concatenate([hidden_state, x], axis=time_dim)                             # [batch_size, rnn_dim+1, x_dim]
             input_ = hx[:,:self.steps,:]                               # [batch_size, self.steps, x_dim]
@@ -612,7 +628,7 @@ class Always(Temporal_Operator):
 
 class Eventually(Temporal_Operator):
     """
-    The Eventually STL formula □_[a,b] 
+    The Eventually STL formula □_[a,b]
     The robustness value is the minimum value of the input trace over a prespecified time interval
 
     Input
@@ -625,11 +641,11 @@ class Eventually(Temporal_Operator):
     def _cell(self, x, hidden_state, time_dim, **kwargs):
         """
         This function describes the operation that takes place at each recurrent step.
-        Input: 
+        Input:
         x  --- the input state at time t [batch_size, 1, ...]
         hidden_state --- the hidden state is of size [batch_size, rnn_dim,...]
         """
-        
+
         # Case 1, interval = [0, inf]
         if self.interval is None:
             input_ = jnp.concatenate([hidden_state, x], axis=time_dim)                # [batch_size, rnn_dim+1, x_dim]
@@ -643,8 +659,8 @@ class Eventually(Temporal_Operator):
             output = maxish(ch, time_dim, keepdims=True, **kwargs)               # [batch_size, 1, x_dim]
             hidden_state = (output, self.M @ h + self.b * x)
         # Case 2 and 4: self.interval is [a, b]
-        else: 
-            
+        else:
+
             hidden_state = self.M @ hidden_state + self.b * x
             hx = jnp.concatenate([hidden_state, x], axis=time_dim)                             # [batch_size, rnn_dim+1, x_dim]
             input_ = hx[:,:self.steps,:]                               # [batch_size, self.steps, x_dim]
@@ -653,6 +669,66 @@ class Eventually(Temporal_Operator):
 
     def __str__(self):
         return "♢ " + str(self._interval) + "( " + str(self.subformula) + " )"
+
+
+class Until(STL_Formula):
+    """
+    The Until STL operator U. Subformula1 U_[a,b] subformula2
+    Input
+    subformula1 --- subformula for lhs of the Until operation
+    subformula2 --- subformula for rhs of the Until operation
+    interval    --- time interval [a,b] where a, b are indices along the time dimension. It is up to the user to keep track of what the timestep is.
+    overlap     --- If overlap=True, then the last time step that ϕ is true, ψ starts being true. That is, sₜ ⊧ ϕ and sₜ ⊧ ψ at a common time t. If overlap=False, when ϕ stops being true, ψ starts being true. That is sₜ ⊧ ϕ and sₜ+₁ ⊧ ψ, but sₜ ¬⊧ ψ
+    """
+
+    def __init__(self, subformula1, subformula2, interval=None, overlap=True):
+        super().__init__()
+        self.subformula1 = subformula1
+        self.subformula2 = subformula2
+        self.interval = interval
+        if overlap == False:
+            self.subformula2 = Eventually(subformula=subformula2, interval=[0,1])
+        self.LARGE_NUMBER = 1E6
+
+    def robustness_trace(self, signal, time_dim, **kwargs):
+        LARGE_NUMBER = self.LARGE_NUMBER
+        assert signal[0].shape[time_dim] == signal[1].shape[time_dim]
+        n_time_steps = signal[0].shape[time_dim]
+        trace1 = self.subformula1(signal[0], **kwargs)
+        trace2 = self.subformula2(signal[0], **kwargs)
+        Alw = Always(subformula=Identity(name=str(self.subformula1)))
+        # TODO (karenl7) this really assumes axis=1 is the time dimension. Can this be generalized?
+        LHS = jnp.permute_dims(jnp.repeat(jnp.expand_dims(trace2, -1), n_time_steps, axis=-1), [0,3,2,1])  # [bs, sub_signal, state, t_prime]
+        RHS = jnp.ones_like(LHS) * -LARGE_NUMBER  # [bs, sub_signal, state, t_prime]
+        if self.interval == None:
+            for i in range(n_time_steps):
+                # TODO (karenl7) this really assumes axis=1 is the time dimension. Can this be generalized?
+                RHS = RHS.at[:,i:,:,i].set(Alw(trace1[:,i:,:]))
+        elif self.interval[1] < jnp.inf:
+            a = self.interval[0]
+            b = self.interval[1]
+            for i in range(n_time_steps):
+                end = i+b+1
+                # TODO (karenl7) this really assumes axis=1 is the time dimension. Can this be generalized?
+                RHS = RHS.at[:,i+a:end,:,i].set(Alw(trace1[:,i:end,:])[:,a:,:])
+        else:
+            a = self.interval[0]
+            for i in range(T):
+                # TODO (karenl7) this really assumes axis=1 is the time dimension. Can this be generalized?
+                RHS = RHS.at[:,i+a:,:,i].set(Alw(trace1[:,i:,:])[:,a:,:])
+
+        # TODO (karenl7) this really assumes axis=1 is the time dimension. Can this be generalized?
+        return maxish(minish(jnp.stack([LHS, RHS], axis=-1), axis=-1, keepdims=False, **kwargs), axis=-1, keepdims=False, **kwargs)
+
+
+    def _next_function(self):
+        """ next function is the input subformulas. For visualization purposes """
+        return [self.subformula1, self.subformula2]
+
+    def __str__(self):
+        return  "(" + str(self.subformula1) + ")" + " U " + "(" + str(self.subformula2) + ")"
+
+
 
 
 class Expression:
@@ -675,10 +751,10 @@ class Expression:
         self.value = jnp.flip(self.value, dim)
         self.reverse = not self.reverse
         return self.value
-    
+
     def __neg__(self):
         return Expression('-' + self.name, -self.value, self.reverse)
-    
+
     def __add__(self, other):
         if isinstance(other, Expression):
             if self.reverse == other.reverse:
@@ -690,13 +766,13 @@ class Expression:
 
     def __radd__(self, other):
         return self.__add__(other)
-    
+
     def __sub__(self, other):
         if isinstance(other, Expression):
             if self.reverse == other.reverse:
                 return Expression(self.name + ' - ' + other.name, self.value - other.value, self.reverse)
             else:
-                raise ValueError("reverse attribute do not match")        
+                raise ValueError("reverse attribute do not match")
         else:
             return Expression(self.name + " - other", self.value - other, self.reverse)
 
@@ -710,7 +786,7 @@ class Expression:
             if self.reverse == other.reverse:
                 return Expression(self.name + ' × ' + other.name, self.value * other.value, self.reverse)
             else:
-                raise ValueError("reverse attribute do not match")    
+                raise ValueError("reverse attribute do not match")
         else:
             return Expression(self.name + " * other", self.value * other, self.reverse)
 
@@ -725,8 +801,8 @@ class Expression:
         if numerator.reverse == denominator.reverse:
             return Expression(numerator.name + '/' + denominator.name, numerator.value/denominator.value, denominator.reverse)
         else:
-            raise ValueError("reverse attribute do not match") 
-        
+            raise ValueError("reverse attribute do not match")
+
 
     # Comparators
     def __lt__(lhs, rhs):
@@ -759,7 +835,7 @@ class Expression:
 
     # def __str__(self):
     #     return str(self.name)
-    
+
     def __call__(self):
         return self.value
 
