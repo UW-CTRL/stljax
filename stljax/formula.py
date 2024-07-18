@@ -448,8 +448,8 @@ class Or(STL_Formula):
     """
     The Or STL formula ∨ (subformula1 ∨ subformula2)
     Input
-    subformula1 --- subformula for lhs of the And operation
-    subformula2 --- subformula for rhs of the And operation
+    subformula1 --- subformula for lhs of the Or operation
+    subformula2 --- subformula for rhs of the Or operation
     """
     def __init__(self, subformula1, subformula2):
         super().__init__()
@@ -482,6 +482,34 @@ class Or(STL_Formula):
 
     def __str__(self):
         return "(" + str(self.subformula1) + ") ∨ (" + str(self.subformula2) + ")"
+
+
+class Implies(STL_Formula):
+    """
+    The Implies STL formula  ⇒. subformula1 ⇒ subformula2
+    Input
+    subformula1 --- subformula for lhs of the Implies operation
+    subformula2 --- subformula for rhs of the Implies operation
+    """
+
+    def __init__(self, subformula1, subformula2):
+        super().__init__()
+        self.subformula1 = subformula1
+        self.subformula2 = subformula2
+
+    def robustness_trace(self, trace, **kwargs):
+        trace1, trace2 = trace
+        signal1 = self.subformula1(trace1, **kwargs)
+        signal2 = self.subformula2(trace2, **kwargs)
+        xx = jnp.stack([-signal1, signal2], axis=-1)      # [batch_size, time_dim, ..., 2]
+        return maxish(xx, axis=-1, keepdims=False, **kwargs)   # [batch_size, time_dim, ...]
+
+    def _next_function(self):
+        """ next function is the input subformulas. For visualization purposes """
+        return [self.subformula1, self.subformula2]
+
+    def __str__(self):
+        return "(" + str(self.subformula1) + ") ⇒ (" + str(self.subformula2) + ")"
 
 class Temporal_Operator(STL_Formula):
     """
