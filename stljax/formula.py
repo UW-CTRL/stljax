@@ -17,7 +17,7 @@ def bar_minus(signal, p=2):
 def M0(signal, eps, weights=None, axis=1, keepdims=True):
     if weights is None:
         weights = jnp.ones_like(signal)
-    sum_w = weights.sum(axis, keepdims=True)
+    sum_w = weights.sum(axis, keepdims=keepdims)
     return (
         eps**sum_w + jnp.prod(signal**weights, axis=axis, keepdims=keepdims)
     ) ** (1 / sum_w)
@@ -26,7 +26,7 @@ def M0(signal, eps, weights=None, axis=1, keepdims=True):
 def Mp(signal, eps, p, weights=None, axis=1, keepdims=True):
     if weights is None:
         weights = jnp.ones_like(signal)
-    sum_w = weights.sum(axis, keepdims=True)
+    sum_w = weights.sum(axis, keepdims=keepdims)
     return (
         eps**p + 1 / sum_w * jnp.sum(weights * signal**p, axis=axis, keepdims=keepdims)
     ) ** (1 / p)
