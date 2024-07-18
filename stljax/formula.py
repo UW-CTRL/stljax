@@ -109,7 +109,7 @@ def gmsr_max_fast(signal, eps, p):
     return -gmsr_min_fast(-signal, eps, p)
 
 
-def maxish(signal, axis, keepdims=True, approx_method="true", temperature=None):
+def maxish(signal, axis, keepdims=True, approx_method="true", temperature=None, **kwargs):
     if isinstance(signal, Expression):
         assert (
             signal.value is not None
@@ -150,8 +150,8 @@ def maxish(signal, axis, keepdims=True, approx_method="true", temperature=None):
             raise ValueError("Invalid approx_method")
 
 
-def minish(signal, axis, keepdims=True, approx_method="true", temperature=None):
-    return -maxish(-signal, axis, keepdims, approx_method, temperature)
+def minish(signal, axis, keepdims=True, approx_method="true", temperature=None, **kwargs):
+    return -maxish(-signal, axis, keepdims, approx_method, temperature, **kwargs)
 
 
 class STL_Formula:
