@@ -555,6 +555,7 @@ class Temporal_Operator(STL_Formula):
         """
         # Case 1, 2, 4
         # TODO: make this less hard-coded. Assumes signal is [bs, time_dim, signal_dim], and already reversed
+        # pads with the signal value at the last time step.
         h0 = jnp.ones([signal.shape[0], self.hidden_dim, signal.shape[2]])*signal[:,:1,:]
 
         # Case 3: if self.interval is [a, jnp.inf), then the hidden state is a tuple (like in an LSTM)
