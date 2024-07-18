@@ -155,7 +155,8 @@ def minish(signal, axis, keepdims=True, approx_method="true", temperature=None):
 
 
 class STL_Formula:
-
+    '''NOTE: Assumes input signals are already TIME-REVERSED! Using Expressions will throw a warning if the reserved flag is set to False. If your signal is a jax.array, then the user is responsible to making sure the signals are already time-reversed.
+    '''
     def __init__(self):
         super(STL_Formula, self).__init__()
 
@@ -171,6 +172,7 @@ class STL_Formula:
         Assumes signal is time reversed
 
         """
+        kwargs["time_dim"] = time_dim
         # np.rollaxis(a, axis)[state]
         return jnp.rollaxis(self.__call__(signal, **kwargs), time_dim)[-1]
 
@@ -181,7 +183,6 @@ class STL_Formula:
     def eval(self, signal, time_dim, **kwargs):
         """
         Extracts the eval_trace value at the given time.
-        Default: time=0 assuming this is the index for the NON-REVERSED trace. But the code will take it from the end since the input signal is TIME REVERSED.
         """
         return self.robustness(signal, time_dim, **kwargs) > 0
 
@@ -189,7 +190,6 @@ class STL_Formula:
     def __call__(self, signal, **kwargs):
         """
         Extracts the robustness_trace value at the given time.
-        Default: time=0 assuming this is the index for the NON-REVERSED trace. But the code will take it from the end since the input signal is TIME REVERSED.
 
         """
 
@@ -690,7 +690,9 @@ class Until(STL_Formula):
             self.subformula2 = Eventually(subformula=subformula2, interval=[0,1])
         self.LARGE_NUMBER = 1E6
 
-    def robustness_trace(self, signal, time_dim, **kwargs):
+    def robustness_trace(self, signal, time_dim=1, **kwargs):
+        # TODO (karenl7) this really assumes axis=1 is the time dimension. Can this be generalized?
+        assert time_dim == 1, "Current implementation assumes time_dim=1"
         LARGE_NUMBER = self.LARGE_NUMBER
         assert signal[0].shape[time_dim] == signal[1].shape[time_dim]
         n_time_steps = signal[0].shape[time_dim]
@@ -700,10 +702,14 @@ class Until(STL_Formula):
         # TODO (karenl7) this really assumes axis=1 is the time dimension. Can this be generalized?
         LHS = jnp.permute_dims(jnp.repeat(jnp.expand_dims(trace2, -1), n_time_steps, axis=-1), [0,3,2,1])  # [bs, sub_signal, state, t_prime]
         RHS = jnp.ones_like(LHS) * -LARGE_NUMBER  # [bs, sub_signal, state, t_prime]
+
+        # Case 1, interval = [0, inf]
         if self.interval == None:
             for i in range(n_time_steps):
                 # TODO (karenl7) this really assumes axis=1 is the time dimension. Can this be generalized?
                 RHS = RHS.at[:,i:,:,i].set(Alw(trace1[:,i:,:]))
+
+        # Case 2 and 4: self.interval is [a, b], a ≥ 0, b < ∞
         elif self.interval[1] < jnp.inf:
             a = self.interval[0]
             b = self.interval[1]
@@ -711,6 +717,8 @@ class Until(STL_Formula):
                 end = i+b+1
                 # TODO (karenl7) this really assumes axis=1 is the time dimension. Can this be generalized?
                 RHS = RHS.at[:,i+a:end,:,i].set(Alw(trace1[:,i:end,:])[:,a:,:])
+
+        # Case 3: self.interval is [a, np.inf), a ≂̸ 0
         else:
             a = self.interval[0]
             for i in range(n_time_steps):
