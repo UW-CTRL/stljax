@@ -10,7 +10,7 @@ setup(
     install_requires=[
         "jax",
         "matplotlib",
-        "numpy"
+        "numpy",
         "graphviz"
     ],
 )
