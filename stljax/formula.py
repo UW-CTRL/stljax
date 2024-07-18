@@ -151,7 +151,7 @@ def maxish(signal, axis, keepdims=True, approx_method="true", temperature=None, 
 
 
 def minish(signal, axis, keepdims=True, approx_method="true", temperature=None, **kwargs):
-    return -maxish(-signal, axis, keepdims, approx_method, temperature)
+    return -maxish(-signal, axis, keepdims, approx_method, temperature, **kwargs)
 
 
 class STL_Formula:
