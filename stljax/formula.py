@@ -608,19 +608,19 @@ class Always(Temporal_Operator):
             return output, output
 
         # Case 3: self.interval is [a, np.inf)
-        if (self._interval[1] == np.inf) & (self._interval[0] > 0):
+        if (self._interval[1] == jnp.inf) & (self._interval[0] > 0):
             c, h = hidden_state
             ch = jnp.concatenate([c, h[:,:1,:]], axis=time_dim)                             # [batch_size, 2, x_dim]
             output = minish(ch, time_dim, keepdims=True, **kwargs)               # [batch_size, 1, x_dim]
-            hidden_state = (output, self.M @ h + self.b * x)
+            hidden_state_ = (output, self.M @ h + self.b * x)
+
         # Case 2 and 4: self.interval is [a, b]
         else:
-
-            hidden_state = self.M @ hidden_state + self.b * x
+            hidden_state_ = self.M @ hidden_state + self.b * x
             hx = jnp.concatenate([hidden_state, x], axis=time_dim)                             # [batch_size, rnn_dim+1, x_dim]
             input_ = hx[:,:self.steps,:]                               # [batch_size, self.steps, x_dim]
             output = minish(input_, time_dim, **kwargs)               # [batch_size, 1, x_dim]
-        return output, hidden_state
+        return output, hidden_state_
 
     def __str__(self):
         return "◻ " + str(self._interval) + "( " + str(self.subformula) + " )"
@@ -657,15 +657,15 @@ class Eventually(Temporal_Operator):
             c, h = hidden_state
             ch = jnp.concatenate([c, h[:,:1,:]], axis=time_dim)                             # [batch_size, 2, x_dim]
             output = maxish(ch, time_dim, keepdims=True, **kwargs)               # [batch_size, 1, x_dim]
-            hidden_state = (output, self.M @ h + self.b * x)
+            hidden_state_ = (output, self.M @ h + self.b * x)
+
         # Case 2 and 4: self.interval is [a, b]
         else:
-
-            hidden_state = self.M @ hidden_state + self.b * x
+            hidden_state_ = self.M @ hidden_state + self.b * x
             hx = jnp.concatenate([hidden_state, x], axis=time_dim)                             # [batch_size, rnn_dim+1, x_dim]
             input_ = hx[:,:self.steps,:]                               # [batch_size, self.steps, x_dim]
             output = maxish(input_, time_dim, **kwargs)               # [batch_size, 1, x_dim]
-        return output, hidden_state
+        return output, hidden_state_
 
     def __str__(self):
         return "♢ " + str(self._interval) + "( " + str(self.subformula) + " )"
@@ -695,7 +695,7 @@ class Until(STL_Formula):
         assert signal[0].shape[time_dim] == signal[1].shape[time_dim]
         n_time_steps = signal[0].shape[time_dim]
         trace1 = self.subformula1(signal[0], **kwargs)
-        trace2 = self.subformula2(signal[0], **kwargs)
+        trace2 = self.subformula2(signal[1], **kwargs)
         Alw = Always(subformula=Identity(name=str(self.subformula1)))
         # TODO (karenl7) this really assumes axis=1 is the time dimension. Can this be generalized?
         LHS = jnp.permute_dims(jnp.repeat(jnp.expand_dims(trace2, -1), n_time_steps, axis=-1), [0,3,2,1])  # [bs, sub_signal, state, t_prime]
@@ -713,7 +713,7 @@ class Until(STL_Formula):
                 RHS = RHS.at[:,i+a:end,:,i].set(Alw(trace1[:,i:end,:])[:,a:,:])
         else:
             a = self.interval[0]
-            for i in range(T):
+            for i in range(n_time_steps):
                 # TODO (karenl7) this really assumes axis=1 is the time dimension. Can this be generalized?
                 RHS = RHS.at[:,i+a:,:,i].set(Alw(trace1[:,i:,:])[:,a:,:])
 
