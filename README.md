@@ -22,8 +22,6 @@ Go into the `stljax` folder. Then to install:
 
 
 ## Usage
-
-(TODO: update demo)
 `demo.ipynb` is an IPython jupyter notebook that showcases the basic functionality of the toolbox:
 * Setting up signals for the formulas, including the use of Expressions
 * Defining STL formulas and visualizing them
@@ -44,7 +42,6 @@ Aside from using jax as the backend, stljax is more recent and tidier implementa
 
 
 ## TODOs
-- Make the demo notebook better
 - finalize expected signal dimensions. Should we be strict about the expected signal size: `[batch_size, time_dim, state_dim]` and `time_dim=-1`. Is `state_dim` even necessary?
 - re-implement stlcg (PyTorch) with the latest version of PyTorch.
 
