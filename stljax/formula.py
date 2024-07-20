@@ -112,6 +112,24 @@ def gmsr_max_fast(signal, eps, p):
 
 
 def maxish(signal, axis, keepdims=True, approx_method="true", temperature=None, **kwargs):
+    """
+    Function to compute max(ish) along an axis.
+
+    Args:
+        signal: A jnp.array or an Expression
+        axis: (Int) axis along to compute max(ish)
+        keepdims: (Bool) whether to keep the original array size. Defaults to True
+        approx_method: (String) argument to choose the type of max(ish) approximation. possible choices are "true", "logsumexp", "softmax", "gmsr" (https://arxiv.org/abs/2405.10996).
+        temperature: Optional, required for approx_method not True.
+
+    Returns:
+        jnp.array corresponding to the maxish
+
+    Raises:
+        If Expression does not have a value, or invalid approx_method
+
+    """
+
     if isinstance(signal, Expression):
         assert (
             signal.value is not None
@@ -153,38 +171,70 @@ def maxish(signal, axis, keepdims=True, approx_method="true", temperature=None, 
 
 
 def minish(signal, axis, keepdims=True, approx_method="true", temperature=None, **kwargs):
+    '''
+    Same as maxish
+    '''
     return -maxish(-signal, axis, keepdims, approx_method, temperature, **kwargs)
 
 
 class STL_Formula:
-    '''NOTE: Assumes input signals are already TIME-REVERSED! Using Expressions will throw a warning if the reserved flag is set to False. If your signal is a jax.array, then the user is responsible to making sure the signals are already time-reversed.
+    '''
+    NOTE: If Expressions and Predicates are used, then the signals will be reversed if needed. Otherwise, user is responsibile for keeping track.
     '''
     def __init__(self):
         super(STL_Formula, self).__init__()
 
     def robustness_trace(self, signal, **kwargs):
-        """ Computes the robustness trace of the formula given an input signal.
-        Outputs: tensor [bs, time_dim,...]
         """
+        Computes the robustness trace of the formula given an input signal.
+
+        Args:
+            signal: jnp.array or Expression. Expected size [bs, time_dim, state_dim]
+            kwargs: Other arguments including time_dim, approx_method, temperature
+
+        Returns:
+            robustness_trace: jnp.array of size equal to the input. index=0 along axis=time_dim is the robustness of the last subsignal. index=-1 along axis=time_dim is the robustness of the entire signal.
+        """
+
         raise NotImplementedError("robustness_trace not yet implemented")
 
     def robustness(self, signal, time_dim, **kwargs):
         """
-        Extracts the robustness_trace value at the given time.
-        Assumes signal is time reversed
+        Computes the robustness value. Extracts the last entry along time_dim of robustness trace.
 
+        Args:
+            signal: jnp.array or Expression. Expected size [bs, time_dim, state_dim]
+            kwargs: Other arguments including time_dim, approx_method, temperature
+
+        Return: jnp.array, same as input with the time_dim removed.
         """
+
         kwargs["time_dim"] = time_dim
-        # np.rollaxis(a, axis)[state]
         return jnp.rollaxis(self.__call__(signal, **kwargs), time_dim)[-1]
 
     def eval_trace(self, signal, **kwargs):
-        """ The values in eval_trace are 0 or 1 (False or True) """
+        """
+        Boolean of robustness_trace
+
+        Args:
+            signal: jnp.array or Expression. Expected size [bs, time_dim, state_dim]
+            kwargs: Other arguments including time_dim, approx_method, temperature
+
+        Returns:
+            eval_trace: jnp.array of size equal to the input but with True/False. index=0 along axis=time_dim is the robustness of the last subsignal. index=-1 along axis=time_dim is the robustness of the entire signal.
+        """
+
         return self.__call__(signal, **kwargs) > 0
 
     def eval(self, signal, time_dim, **kwargs):
         """
-        Extracts the eval_trace value at the given time.
+        Boolean of robustness
+
+        Args:
+            signal: jnp.array or Expression. Expected size [bs, time_dim, state_dim]
+            kwargs: Other arguments including time_dim, approx_method, temperature
+
+        Return: jnp.array with True/False, same as input with the time_dim removed.
         """
         return self.robustness(signal, time_dim, **kwargs) > 0
 
@@ -192,6 +242,8 @@ class STL_Formula:
     def __call__(self, signal, **kwargs):
         """
         Evaluates the robustness_trace given the input. The input is converted to the numerical value first.
+
+        See  STL_Formula.robustness_trace
         """
 
         inputs = convert_to_input_values(signal)
@@ -215,7 +267,7 @@ class STL_Formula:
         return Negation(self)
 
 class Identity(STL_Formula):
-    """ The identity formula """
+    """ The identity formula. Use in Until"""
     def __init__(self, name='x'):
         super().__init__()
         self.name = name
@@ -233,10 +285,10 @@ class Identity(STL_Formula):
 
 class LessThan(STL_Formula):
     """
-    The LessThan predicate  (signal) < c
-    lhs < val where lhs is a placeholder for a signal, and val is the constant.
-    lhs can be a string or an Expression
-    val can be a float, int, Expression, or tensor. It cannot be a string.
+    The LessThan operation. lhs < val where lhs is a placeholder for a signal, and val is a constant.
+    Args:
+        lhs: string, Expression, or Predicate
+        val: float, int, Expression, or array (of appropriate size). It cannot be a string.
     """
     def __init__(self, lhs='x', val='c'):
         super().__init__()
@@ -244,12 +296,16 @@ class LessThan(STL_Formula):
         assert not isinstance(val, str), "val on the rhs cannot be a string"
         self.lhs = lhs
         self.val = val
-        self.subformula = None
 
-    def robustness_trace(self, trace, predicate_scale=1.0, **kwargs):
+    def robustness_trace(self, signal, predicate_scale=1.0, **kwargs):
         """
-        Computing robustness trace of trace < c
-        Optional: scale the robustness by a factor predicate_scale. Default: 1.0
+        Computes robustness trace:  rhs - lhs
+        Args:
+            signal: jnp.array. Expected size [bs, time_dim, state_dim]
+            predicate_scale: Optional. scale the robustness by a factor predicate_scale. Default: 1.0
+
+        Returns:
+            robustness_trace: jnp.array. Same size as signal.
         """
         if isinstance(self.val, Expression):
             assert self.val.value is not None, "Expression does not have numerical values"
@@ -261,11 +317,11 @@ class LessThan(STL_Formula):
         if isinstance(self.lhs, Predicate):
             if not self.lhs.reverse:
                 warnings.warn("Input Predicate \"{input_name}\" is not time reversed. Reversing the signal now...".format(input_name=self.lhs.name))
-                return (c_val - jnp.flip(self.lhs(trace), self.lhs.time_dim)) * predicate_scale
+                return (c_val - jnp.flip(self.lhs(signal), self.lhs.time_dim)) * predicate_scale
             else:
-                return (c_val - self.lhs(trace)) * predicate_scale
+                return (c_val - self.lhs(signal)) * predicate_scale
         else:
-            return (c_val - trace) * predicate_scale
+            return (c_val - signal) * predicate_scale
 
 
     def _next_function(self):
@@ -287,10 +343,10 @@ class LessThan(STL_Formula):
 
 class GreaterThan(STL_Formula):
     """
-    The GreaterThan predicate  (signal) > c
-    lhs > val where lhs is a placeholder for a signal, and val is the constant.
-    lhs can be a string or an Expression
-    val can be a float, int, Expression, or tensor. It cannot be a string.
+    The GreaterThan operation. lhs > val where lhs is a placeholder for a signal, and val is a constant.
+    Args:
+        lhs: string, Expression, or Predicate
+        val: float, int, Expression, or array (of appropriate size). It cannot be a string.
     """
     def __init__(self, lhs='x', val='c'):
         super().__init__()
@@ -302,8 +358,13 @@ class GreaterThan(STL_Formula):
 
     def robustness_trace(self, trace, predicate_scale=1.0, **kwargs):
         """
-        Computing robustness trace of trace > c
-        Optional: scale the robustness by a factor predicate_scale. Default: 1.0
+        Computes robustness trace:  lhs - rhs
+        Args:
+            signal: jnp.array. Expected size [bs, time_dim, state_dim]
+            predicate_scale: Optional. scale the robustness by a factor predicate_scale. Default: 1.0
+
+        Returns:
+            robustness_trace: jnp.array. Same size as signal.
         """
         if isinstance(self.val, Expression):
             assert self.val.value is not None, "Expression does not have numerical values"
@@ -341,10 +402,10 @@ class GreaterThan(STL_Formula):
 
 class Equal(STL_Formula):
     """
-    The Equal predicate  (signal) == c
-    lhs == val where lhs is a placeholder for a signal, and val is the constant.
-    lhs can be a string or an Expression
-    val can be a float, int, Expression, or tensor. It cannot be a string.
+    The Equal operation. lhs == val where lhs is a placeholder for a signal, and val is a constant.
+    Args:
+        lhs: string, Expression, or Predicate
+        val: float, int, Expression, or array (of appropriate size). It cannot be a string.
     """
     def __init__(self, lhs='x', val='c'):
         super().__init__()
@@ -356,10 +417,14 @@ class Equal(STL_Formula):
 
     def robustness_trace(self, trace, predicate_scale=1.0, **kwargs):
         """
-        Computing robustness trace of trace == c
-        Optional: scale the robustness by a factor predicate_scale. Default: 1.0
-        """
+        Computes robustness trace:  -abs(lhs - rhs)
+        Args:
+            signal: jnp.array. Expected size [bs, time_dim, state_dim]
+            predicate_scale: Optional. scale the robustness by a factor predicate_scale. Default: 1.0
 
+        Returns:
+            robustness_trace: jnp.array. Same size as signal.
+        """
         if isinstance(self.val, Expression):
             assert self.val.value is not None, "Expression does not have numerical values"
             c_val = self.val.value
@@ -396,21 +461,25 @@ class Equal(STL_Formula):
 
 class Negation(STL_Formula):
     """
-    The Negation STL formula ¬
-    Negates the subformula.
+    The Negation STL formula ¬ negates the subformula.
 
-    Input
-    subformula --- the subformula to be negated
+    Args:
+        subformula: an STL formula
     """
     def __init__(self, subformula):
         super(Negation, self).__init__()
         self.subformula = subformula
 
-    def robustness_trace(self, trace, **kwargs):
+    def robustness_trace(self, signal, **kwargs):
         """
-        Computing robustness trace of ¬(subformula)
+        Computes robustness trace:  -subformula(signal)
+        Args:
+            signal: jnp.array. Expected size [bs, time_dim, state_dim]
+            kwargs: Other arguments including time_dim, approx_method, temperature
+        Returns:
+            robustness_trace: jnp.array. Same size as signal.
         """
-        return -self.subformula(trace, **kwargs)
+        return -self.subformula(signal, **kwargs)
 
     def _next_function(self):
         """ next function is the input subformula. For visualization purposes """
@@ -423,10 +492,11 @@ class Negation(STL_Formula):
 class And(STL_Formula):
     """
     The And STL formula ∧ (subformula1 ∧ subformula2)
-    Input
-    subformula1 --- subformula for lhs of the And operation
-    subformula2 --- subformula for rhs of the And operation
+    Args:
+        subformula1: subformula for lhs of the And operation
+        subformula2: subformula for rhs of the And operation
     """
+
     def __init__(self, subformula1, subformula2):
         super().__init__()
         self.subformula1 = subformula1
@@ -436,6 +506,10 @@ class And(STL_Formula):
     def separate_and(formula, input_, **kwargs):
         """
         Function of seperate out multiple And operations. e.g., ϕ₁ ∧ ϕ₂ ∧ ϕ₃ ∧ ϕ₄ ∧ ...
+
+        Args:
+            formula: STL_formula
+            input_: input of STL_formula
         """
         if formula.__class__.__name__ != "And":
             return jnp.expand_dims(formula(input_, **kwargs), -1)
@@ -447,10 +521,14 @@ class And(STL_Formula):
 
     def robustness_trace(self, inputs, **kwargs):
         """
-        Computing robustness trace of subformula1 ∧ subformula2
-        Input
-        inputs --- a tuple of input traces corresponding to each subformula respectively. Each element of the tuple could also be a tuple if the corresponding subformula requires multiple inputs (e.g, ϕ₁(x) ∧ (ϕ₂(y) ∧ ϕ₃(z)) would have inputs=(x, (y,z)))
-        trace1 and trace2 are size [batch_size, time_dim, x_dim]
+        Computing robustness trace of subformula1 ∧ subformula2  min(subformula1(input1), subformula2(input2))
+
+        Args:
+            inputs: input signal for the formula. If using Expressions to define the formula, then inputs a tuple of signals corresponding to each subformula. Each element of the tuple could also be a tuple if the corresponding subformula requires multiple inputs (e.g, ϕ₁(x) ∧ (ϕ₂(y) ∧ ϕ₃(z)) would have inputs=(x, (y,z))). If using Predicates to define the formula, then inputs is just a single jnp.array. Not need for different signals for each subformula. Expected signal is size [batch_size, time_dim, x_dim]
+            kwargs: Other arguments including time_dim, approx_method, temperature
+
+        Returns:
+            robustness_trace: jnp.array. Same size as signal.
         """
         xx = And.separate_and(self, inputs, **kwargs)
         return minish(xx, axis=-1, keepdims=False, **kwargs)                                         # [batch_size, time_dim, ...]
@@ -466,9 +544,9 @@ class And(STL_Formula):
 class Or(STL_Formula):
     """
     The Or STL formula ∨ (subformula1 ∨ subformula2)
-    Input
-    subformula1 --- subformula for lhs of the Or operation
-    subformula2 --- subformula for rhs of the Or operation
+    Args:
+        subformula1: subformula for lhs of the Or operation
+        subformula2: subformula for rhs of the Or operation
     """
     def __init__(self, subformula1, subformula2):
         super().__init__()
@@ -479,6 +557,10 @@ class Or(STL_Formula):
     def separate_or(formula, input_, **kwargs):
         """
         Function of seperate out multiple Or operations. e.g., ϕ₁ ∨ ϕ₂ ∨ ϕ₃ ∨ ϕ₄ ∨ ...
+
+        Args:
+            formula: STL_formula
+            input_: input of STL_formula
         """
         if isinstance(input_, tuple):
             return jnp.concatenate([Or.separate_or(formula.subformula1, input_[0], **kwargs), Or.separate_or(formula.subformula2, input_[1], **kwargs)], axis=-1)
@@ -488,10 +570,14 @@ class Or(STL_Formula):
 
     def robustness_trace(self, inputs, **kwargs):
         """
-        Computing robustness trace of subformula1 ∧ subformula2
-        Input
-        inputs --- a tuple of input traces corresponding to each subformula respectively. Each element of the tuple could also be a tuple if the corresponding subformula requires multiple inputs (e.g, ϕ₁(x) ∨ (ϕ₂(y) ∨ ϕ₃(z)) would have inputs=(x, (y,z)))
-        trace1 and trace2 are size [batch_size, time_dim, x_dim]
+        Computing robustness trace of subformula1 ∨ subformula2  max(subformula1(input1), subformula2(input2))
+
+        Args:
+            inputs: input signal for the formula. If using Expressions to define the formula, then inputs a tuple of signals corresponding to each subformula. Each element of the tuple could also be a tuple if the corresponding subformula requires multiple inputs (e.g, ϕ₁(x) ∨ (ϕ₂(y) ∨ ϕ₃(z)) would have inputs=(x, (y,z))). If using Predicates to define the formula, then inputs is just a single jnp.array. Not need for different signals for each subformula. Expected signal is size [batch_size, time_dim, x_dim]
+            kwargs: Other arguments including time_dim, approx_method, temperature
+
+        Returns:
+            robustness_trace: jnp.array. Same size as signal.
         """
         xx = Or.separate_and(self, inputs, **kwargs)
         return maxish(xx, axis=-1, keepdims=False, **kwargs)                                         # [batch_size, time_dim, ...]
@@ -506,18 +592,27 @@ class Or(STL_Formula):
 
 class Implies(STL_Formula):
     """
-    The Implies STL formula  ⇒. subformula1 ⇒ subformula2
-    Input
-    subformula1 --- subformula for lhs of the Implies operation
-    subformula2 --- subformula for rhs of the Implies operation
+    The Implies STL formula ⇒. subformula1 ⇒ subformula2
+    Args:
+        subformula1: subformula for lhs of the Implies operation
+        subformula2: subformula for rhs of the Implies operation
     """
-
     def __init__(self, subformula1, subformula2):
         super().__init__()
         self.subformula1 = subformula1
         self.subformula2 = subformula2
 
     def robustness_trace(self, trace, **kwargs):
+        """
+        Computing robustness trace of subformula1 ⇒ subformula2    max(-subformula1(input1), subformula2(input2))
+
+        Args:
+            inputs: input signal for the formula. If using Expressions to define the formula, then inputs a tuple of signals corresponding to each subformula. Each element of the tuple could also be a tuple if the corresponding subformula requires multiple inputs (e.g, ϕ₁(x) ∨ (ϕ₂(y) ∨ ϕ₃(z)) would have inputs=(x, (y,z))). If using Predicates to define the formula, then inputs is just a single jnp.array. Not need for different signals for each subformula. Expected signal is size [batch_size, time_dim, x_dim]
+            kwargs: Other arguments including time_dim, approx_method, temperature
+
+        Returns:
+            robustness_trace: jnp.array. Same size as signal.
+        """
         trace1, trace2 = trace
         signal1 = self.subformula1(trace1, **kwargs)
         signal2 = self.subformula2(trace2, **kwargs)
@@ -535,10 +630,10 @@ class Temporal_Operator(STL_Formula):
     """
     Class to compute Eventually and Always. This builds a recurrent cell to perform dynamic programming
 
-    Inputs
-    subformula --- The subformula that the temporal operator is applied to.
-    interval   --- The time interval that the temporal operator operates on.
-                   Default: None which means [0, jnp.inf]. Other options car be: [a, b] (b < jnp.inf), [a, jnp.inf] (a > 0)
+    Args:
+        subformula: The subformula that the temporal operator is applied to.
+        interval: The time interval that the temporal operator operates on. Default: None which means [0, jnp.inf]. Other options car be: [a, b] (b < jnp.inf), [a, jnp.inf] (a > 0)
+
     NOTE: Assume that the interval is describing the INDICES of the desired time interval. The user is responsible for converting the time interval (in time units) into indices (integers) using knowledge of the time step size.
     """
     def __init__(self, subformula, interval=None):
@@ -558,15 +653,14 @@ class Temporal_Operator(STL_Formula):
 
 
     def _initialize_hidden_state(self, signal):
-
         """
         Compute the initial hidden state.
 
-        Input
-        signal --- the input signal [batch_size, time_dim, signal_dim]
+        Args:
+            signal: the input signal. Expected size [batch_size, time_dim, signal_dim]
 
-        Output
-        h0 --- initial hidden state is [batch_size, hidden_dim, signal_dim]
+        Returns:
+            h0: initial hidden state is [batch_size, hidden_dim, signal_dim]
 
         Notes:
         Initializing the hidden state requires padding on the signal. Currently, the default is to extend the last value.
@@ -587,9 +681,12 @@ class Temporal_Operator(STL_Formula):
     def _cell(self, x, hidden_state, time_dim=1, **kwargs):
         """
         This function describes the operation that takes place at each recurrent step.
-        Input:
-        x  --- the input state at time t [batch_size, 1, ...]
-        hidden_state --- the hidden state. It is either a tensor, or a tuple of tensors, depending on the interval chosen and other arguments. Generally, the hidden state is of size [batch_size, hidden_dim,...]
+        Args:
+            x: the input state at time t [batch_size, 1, ...]
+            hidden_state: the hidden state. It is either a tensor, or a tuple of tensors, depending on the interval chosen and other arguments. Generally, the hidden state is of size [batch_size, hidden_dim,...]
+
+        Return:
+            output and next hidden_state
         """
         raise NotImplementedError("_cell is not implemented")
 
@@ -597,11 +694,15 @@ class Temporal_Operator(STL_Formula):
     def _run_cell(self, signal, time_dim=1, **kwargs):
         """
         Function to run a signal through a cell T times, where T is the length of the signal in the time dimension
-        Input
-        signal      --- input signal, size = [bs, time_dim, ...]
-        scale       --- scale factor used for the minish/maxish function
-        distributed --- Boolean to indicate whether to distribute gradients over multiple min/max values. Default: False
 
+        Args:
+            signal: input signal, size = [bs, time_dim, ...]
+            time_dim: axis corresponding to time_dim. Default: 1
+            kwargs: Other arguments including time_dim, approx_method, temperature
+
+        Return:
+            outputs: list of outputs
+            states: list of hidden_states
         """
 
         outputs = []
@@ -615,13 +716,21 @@ class Temporal_Operator(STL_Formula):
         return outputs, states
 
 
-    def robustness_trace(self, inputs, time_dim=1, **kwargs):
+    def robustness_trace(self, signal, time_dim=1, **kwargs):
         """
         Function to compute robustness trace of a temporal STL formula
         First, compute the robustness trace of the subformula, and use that as the input for the recurrent computation
+
+        Args:
+            signal: input signal, size = [bs, time_dim, ...]
+            time_dim: axis corresponding to time_dim. Default: 1
+            kwargs: Other arguments including time_dim, approx_method, temperature
+
+        Returns:
+            robustness_trace: jnp.array. Same size as signal.
         """
 
-        trace = self.subformula(inputs, **kwargs)
+        trace = self.subformula(signal, **kwargs)
         outputs, _ = self._run_cell(trace, time_dim, **kwargs)
         return jnp.concatenate(outputs, axis=time_dim)                              # [batch_size, time_dim, ...]
 
@@ -629,27 +738,22 @@ class Temporal_Operator(STL_Formula):
         """ next function is the input subformula. For visualization purposes """
         return [self.subformula]
 
-
 class Always(Temporal_Operator):
     """
-    The Always STL formula □_[a,b]
+    The Always STL formula □_[a,b] subformula
     The robustness value is the minimum value of the input trace over a prespecified time interval
 
-    Input
-    subformula --- subformula that the always operation is applied on
-    interval   --- time interval [a,b] where a, b are indices along the time dimension. It is up to the user to keep track of what the timestep is.
+    Args:
+        subformula: subformula that the Always operation is applied on
+        interval: time interval [a,b] where a, b are indices along the time dimension. It is up to the user to keep track of what the timestep size is.
     """
     def __init__(self, subformula, interval=None):
         super().__init__(subformula=subformula, interval=interval)
 
     def _cell(self, x, hidden_state, time_dim, **kwargs):
         """
-        This function describes the operation that takes place at each recurrent step.
-        Input:
-        x  --- the input state at time t [batch_size, 1, ...]
-        hidden_state --- the hidden state is of size [batch_size, rnn_dim,...]
+        see Temporal_Operator._cell
         """
-
         # Case 1, interval = [0, inf]
         if self.interval is None:
             input_ = jnp.concatenate([hidden_state, x], axis=time_dim)                # [batch_size, rnn_dim+1, x_dim]
@@ -677,22 +781,19 @@ class Always(Temporal_Operator):
 
 class Eventually(Temporal_Operator):
     """
-    The Eventually STL formula □_[a,b]
+    The Eventually STL formula ♢_[a,b] subformula
     The robustness value is the minimum value of the input trace over a prespecified time interval
 
-    Input
-    subformula --- subformula that the Eventually operation is applied on
-    interval   --- time interval [a,b] where a, b are indices along the time dimension. It is up to the user to keep track of what the timestep is.
+    Args:
+        subformula: subformula that the Eventually operation is applied on
+        interval: time interval [a,b] where a, b are indices along the time dimension. It is up to the user to keep track of what the timestep size is.
     """
     def __init__(self, subformula, interval=None):
         super().__init__(subformula=subformula, interval=interval)
 
     def _cell(self, x, hidden_state, time_dim, **kwargs):
         """
-        This function describes the operation that takes place at each recurrent step.
-        Input:
-        x  --- the input state at time t [batch_size, 1, ...]
-        hidden_state --- the hidden state is of size [batch_size, rnn_dim,...]
+        see Temporal_Operator._cell
         """
 
         # Case 1, interval = [0, inf]
@@ -723,11 +824,11 @@ class Eventually(Temporal_Operator):
 class Until(STL_Formula):
     """
     The Until STL operator U. Subformula1 U_[a,b] subformula2
-    Input
-    subformula1 --- subformula for lhs of the Until operation
-    subformula2 --- subformula for rhs of the Until operation
-    interval    --- time interval [a,b] where a, b are indices along the time dimension. It is up to the user to keep track of what the timestep is.
-    overlap     --- If overlap=True, then the last time step that ϕ is true, ψ starts being true. That is, sₜ ⊧ ϕ and sₜ ⊧ ψ at a common time t. If overlap=False, when ϕ stops being true, ψ starts being true. That is sₜ ⊧ ϕ and sₜ+₁ ⊧ ψ, but sₜ ¬⊧ ψ
+    Arg:
+        subformula1: subformula for lhs of the Until operation
+        subformula2: subformula for rhs of the Until operation
+        interval: time interval [a,b] where a, b are indices along the time dimension. It is up to the user to keep track of what the timestep is.
+        overlap: If overlap=True, then the last time step that ϕ is true, ψ starts being true. That is, sₜ ⊧ ϕ and sₜ ⊧ ψ at a common time t. If overlap=False, when ϕ stops being true, ψ starts being true. That is sₜ ⊧ ϕ and sₜ+₁ ⊧ ψ, but sₜ ¬⊧ ψ
     """
 
     def __init__(self, subformula1, subformula2, interval=None, overlap=True):
@@ -740,6 +841,19 @@ class Until(STL_Formula):
         self.LARGE_NUMBER = 1E6
 
     def robustness_trace(self, signal, time_dim=1, **kwargs):
+        """
+        Computing robustness trace of subformula1 U subformula2  (see paper)
+
+        Args:
+            signal: input signal for the formula. If using Expressions to define the formula, then inputs a tuple of signals corresponding to each subformula. If using Predicates to define the formula, then inputs is just a single jnp.array. Not need for different signals for each subformula. Expected signal is size [batch_size, time_dim, x_dim]
+            time_dim: axis for time_dim. Default: 1
+            kwargs: Other arguments including time_dim, approx_method, temperature
+
+        Returns:
+            robustness_trace: jnp.array. Same size as signal.
+        """
+
+
         # TODO (karenl7) this really assumes axis=1 is the time dimension. Can this be generalized?
         assert time_dim == 1, "Current implementation assumes time_dim=1"
         LARGE_NUMBER = self.LARGE_NUMBER
@@ -793,7 +907,6 @@ class Expression:
     value: jnp.array
     reverse: bool
     time_dim: int
-
 
     def __init__(self, name, value, reverse, time_dim=1):
         self.value = value
