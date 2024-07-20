@@ -88,7 +88,7 @@ A step-by-step break down:\
 
 4. With these two `Predicate` objects, we can define an STL formula `ϕ = □ (velocity_pred > 5.0) ∨ ◊ (acceleration_pred > 5.0)` which is equivalent to `ϕ = Always(velocity_pred > 5.0) & Eventually(acceleration_pred > 5.0)`.
 
-5. To compute the robustness trace of `ϕ`, we run `ϕ(trajectory)` where the input is what all the predicate functions expects the input to be.
+5. To compute the robustness trace of `ϕ`, we run `ϕ(trajectory)` where the input is what all the predicate functions expect the input to be.
 
 
 
