@@ -191,26 +191,11 @@ class STL_Formula:
 
     def __call__(self, signal, **kwargs):
         """
-        Extracts the robustness_trace value at the given time.
-
-        """
-
-        """
         Evaluates the robustness_trace given the input. The input is converted to the numerical value first.
         """
-        if isinstance(signal, Expression):
-            assert signal.value is not None, "Input Expression does not have numerical values"
-            # if not signal.reverse:
-            #     warnings.warn("Input Expression \"{input_name}\" is not time reversed! stljax will time-reverse the signal for you...".format(input_name=signal.name))
-            # # signal = signal.value
-            return self.robustness_trace(signal, **kwargs)
-        elif isinstance(signal, jax.Array):
-            return self.robustness_trace(signal, **kwargs)
-        elif isinstance(signal, tuple):
-            """ Accounts for the case that the formula requires two signals (e.g., And) """
-            return self.robustness_trace(convert_to_input_values(signal), **kwargs)
-        else:
-            raise ValueError("Not a invalid input trace")
+
+        inputs = convert_to_input_values(signal)
+        return self.robustness_trace(inputs, **kwargs)
 
     def _next_function(self):
         """Function to keep track of the subformulas. For visualization purposes"""
@@ -266,38 +251,22 @@ class LessThan(STL_Formula):
         Computing robustness trace of trace < c
         Optional: scale the robustness by a factor predicate_scale. Default: 1.0
         """
-        c = self.val
-
-        if isinstance(trace, Expression):
-            if not trace.reverse:
-                warnings.warn("Input Expression \"{input_name}\" is not time reversed! stljax will time-reverse the signal for you...".format(input_name=trace.name))
-                signal = jnp.flip(trace.value, trace.time_dim)
-            else:
-                signal = trace.value
-
-        elif isinstance(trace, jax.Array):
-
-            if isinstance(self.lhs, Predicate):
-                if not self.lhs.reverse:
-                    warnings.warn("Input Predicate \"{input_name}\" is not time reversed. Reversing the signal now...".format(input_name=self.lhs.name))
-                    signal = jnp.flip(self.lhs(trace, **kwargs), self.lhs.time_dim)
-                else:
-                    signal = self.lhs(trace, **kwargs)
-
-            else:
-                signal = trace
-
-        else:
-            raise ValueError("Not a invalid input trace")
-
         if isinstance(self.val, Expression):
-            assert c.value is not None, "Expression does not have numerical values"
-            c_val = c.value
+            assert self.val.value is not None, "Expression does not have numerical values"
+            c_val = self.val.value
 
         else:
-            c_val = c
+            c_val = self.val
 
-        return (c_val - signal) * predicate_scale
+        if isinstance(self.lhs, Predicate):
+            if not self.lhs.reverse:
+                warnings.warn("Input Predicate \"{input_name}\" is not time reversed. Reversing the signal now...".format(input_name=self.lhs.name))
+                return (c_val - jnp.flip(self.lhs(trace), self.lhs.time_dim)) * predicate_scale
+            else:
+                return (c_val - self.lhs(trace)) * predicate_scale
+        else:
+            return (c_val - trace) * predicate_scale
+
 
     def _next_function(self):
         """ next function is the input subformula. For visualization purposes """
@@ -336,39 +305,21 @@ class GreaterThan(STL_Formula):
         Computing robustness trace of trace > c
         Optional: scale the robustness by a factor predicate_scale. Default: 1.0
         """
-
-        c = self.val
-
-        if isinstance(trace, Expression):
-            if not trace.reverse:
-                warnings.warn("Input Expression \"{input_name}\" is not time reversed! stljax will time-reverse the signal for you...".format(input_name=trace.name))
-                signal = jnp.flip(trace.value, trace.time_dim)
-            else:
-                signal = trace.value
-
-        elif isinstance(trace, jax.Array):
-
-            if isinstance(self.lhs, Predicate):
-                if not self.lhs.reverse:
-                    warnings.warn("Input Predicate \"{input_name}\" is not time reversed. Reversing the signal now...".format(input_name=self.lhs.name))
-                    signal = jnp.flip(self.lhs(trace, **kwargs), self.lhs.time_dim)
-                else:
-                    signal = self.lhs(trace, **kwargs)
-
-            else:
-                signal = trace
-
-        else:
-            raise ValueError("Not a invalid input trace")
-
         if isinstance(self.val, Expression):
-            assert c.value is not None, "Expression does not have numerical values"
-            c_val = c.value
+            assert self.val.value is not None, "Expression does not have numerical values"
+            c_val = self.val.value
 
         else:
-            c_val = c
+            c_val = self.val
 
-        return -(c_val - signal) * predicate_scale
+        if isinstance(self.lhs, Predicate):
+            if not self.lhs.reverse:
+                warnings.warn("Input Predicate \"{input_name}\" is not time reversed. Reversing the signal now...".format(input_name=self.lhs.name))
+                return -(c_val - jnp.flip(self.lhs(trace), self.lhs.time_dim)) * predicate_scale
+            else:
+                return -(c_val - self.lhs(trace)) * predicate_scale
+        else:
+            return -(c_val - trace) * predicate_scale
 
     def _next_function(self):
         """ next function is the input subformula. For visualization purposes """
@@ -408,39 +359,22 @@ class Equal(STL_Formula):
         Computing robustness trace of trace == c
         Optional: scale the robustness by a factor predicate_scale. Default: 1.0
         """
-        c = self.val
-
-        if isinstance(trace, Expression):
-            if not trace.reverse:
-                warnings.warn("Input Expression \"{input_name}\" is not time reversed! stljax will time-reverse the signal for you...".format(input_name=trace.name))
-                signal = jnp.flip(trace.value, trace.time_dim)
-            else:
-                signal = trace.value
-
-        elif isinstance(trace, jax.Array):
-
-            if isinstance(self.lhs, Predicate):
-                if not self.lhs.reverse:
-                    warnings.warn("Input Predicate \"{input_name}\" is not time reversed. Reversing the signal now...".format(input_name=self.lhs.name))
-                    signal = jnp.flip(self.lhs(trace, **kwargs), self.lhs.time_dim)
-                else:
-                    signal = self.lhs(trace, **kwargs)
-
-            else:
-                signal = trace
-
-        else:
-            raise ValueError("Not a invalid input trace")
 
         if isinstance(self.val, Expression):
-            assert c.value is not None, "Expression does not have numerical values"
-            c_val = c.value
+            assert self.val.value is not None, "Expression does not have numerical values"
+            c_val = self.val.value
 
         else:
-            c_val = c
+            c_val = self.val
 
-
-        return -jnp.abs(c_val - signal) * predicate_scale
+        if isinstance(self.lhs, Predicate):
+            if not self.lhs.reverse:
+                warnings.warn("Input Predicate \"{input_name}\" is not time reversed. Reversing the signal now...".format(input_name=self.lhs.name))
+                return -jnp.abs(c_val - jnp.flip(self.lhs(trace), self.lhs.time_dim)) * predicate_scale
+            else:
+                return -jnp.abs(c_val - self.lhs(trace)) * predicate_scale
+        else:
+            return -jnp.abs(c_val - trace) * predicate_scale
 
     def _next_function(self):
         """ next function is the input subformula. For visualization purposes """
@@ -809,7 +743,7 @@ class Until(STL_Formula):
         # TODO (karenl7) this really assumes axis=1 is the time dimension. Can this be generalized?
         assert time_dim == 1, "Current implementation assumes time_dim=1"
         LARGE_NUMBER = self.LARGE_NUMBER
-        # assert signal[0].shape[time_dim] == signal[1].shape[time_dim]
+        assert signal[0].shape[time_dim] == signal[1].shape[time_dim]
         n_time_steps = signal[0].shape[time_dim] # TODO: WIP
         trace1 = self.subformula1(signal[0], **kwargs)
         trace2 = self.subformula2(signal[1], **kwargs)
@@ -1067,32 +1001,22 @@ class Predicate:
         return str(self.name)
 
     def __call__(self, signal, **kwargs):
-        predicate_output = self.predicate_function(signal)
-        if not self.reverse:
-            return jnp.flip(predicate_output, self.time_dim)
-        else:
-            return predicate_output
+        return self.predicate_function(signal)
 
 def convert_to_input_values(inputs):
-    x_, y_ = inputs
-    if isinstance(x_, Expression):
-        assert x_.value is not None, "Input Expression does not have numerical values"
-        x_ret = x_
-    elif isinstance(x_, jax.Array):
-        x_ret = x_
-    elif isinstance(x_, tuple):
-        x_ret = convert_to_input_values(x_)
+    if not isinstance(inputs, tuple):
+        if isinstance(inputs, Expression):
+            assert inputs.value is not None, "Input Expression does not have numerical values"
+            # if Expression is not time reversed
+            if not inputs.reverse:
+                # throw warning to the user
+                warnings.warn("Input Expression \"{input_name}\" is not time reversed! stljax will time-reverse the inputs for you...".format(input_name=inputs.name))
+                return jnp.flip(inputs.value, inputs.time_dim)
+            else:
+                return inputs.value
+        elif isinstance(inputs, jax.Array):
+            return inputs
+        else:
+            raise ValueError("Not a invalid input trace")
     else:
-        raise ValueError("First argument is an invalid input trace")
-
-    if isinstance(y_, Expression):
-        assert y_.value is not None, "Input Expression does not have numerical values"
-        y_ret = y_
-    elif isinstance(y_, jax.Array):
-        y_ret = y_
-    elif isinstance(y_, tuple):
-        y_ret = convert_to_input_values(y_)
-    else:
-        raise ValueError("Second argument is an invalid input trace")
-
-    return (x_ret, y_ret)
+        return (convert_to_input_values(inputs[0]), convert_to_input_values(inputs[1]))
