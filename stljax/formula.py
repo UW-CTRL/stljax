@@ -1,6 +1,8 @@
 import jax
 import jax.numpy as jnp
 import warnings
+from typing import Callable
+
 warnings.simplefilter("default")
 
 
@@ -198,14 +200,14 @@ class STL_Formula:
         """
         if isinstance(signal, Expression):
             assert signal.value is not None, "Input Expression does not have numerical values"
-            if not signal.reverse:
-                warnings.warn("Input Expression \"{input_name}\" is not time reversed".format(input_name=signal.name))
-            signal = signal.value
+            # if not signal.reverse:
+            #     warnings.warn("Input Expression \"{input_name}\" is not time reversed! stljax will time-reverse the signal for you...".format(input_name=signal.name))
+            # # signal = signal.value
             return self.robustness_trace(signal, **kwargs)
         elif isinstance(signal, jax.Array):
             return self.robustness_trace(signal, **kwargs)
         elif isinstance(signal, tuple):
-            """ Accounts for the case that the formula requires two signal (e.g., And) """
+            """ Accounts for the case that the formula requires two signals (e.g., And) """
             return self.robustness_trace(convert_to_input_values(signal), **kwargs)
         else:
             raise ValueError("Not a invalid input trace")
@@ -253,7 +255,7 @@ class LessThan(STL_Formula):
     """
     def __init__(self, lhs='x', val='c'):
         super().__init__()
-        assert isinstance(lhs, str) | isinstance(lhs, Expression), "LHS of expression needs to be a string (input name) or Expression"
+        assert isinstance(lhs, str) | isinstance(lhs, Expression) | isinstance(lhs, Predicate), "LHS of expression needs to be a string (input name) or Expression"
         assert not isinstance(val, str), "val on the rhs cannot be a string"
         self.lhs = lhs
         self.val = val
@@ -264,12 +266,38 @@ class LessThan(STL_Formula):
         Computing robustness trace of trace < c
         Optional: scale the robustness by a factor predicate_scale. Default: 1.0
         """
+        c = self.val
+
         if isinstance(trace, Expression):
-            trace = trace.value
-        if isinstance(self.val, Expression):
-            return (self.val.value - trace) * predicate_scale
+            if not trace.reverse:
+                warnings.warn("Input Expression \"{input_name}\" is not time reversed! stljax will time-reverse the signal for you...".format(input_name=trace.name))
+                signal = jnp.flip(trace.value, trace.time_dim)
+            else:
+                signal = trace.value
+
+        elif isinstance(trace, jax.Array):
+
+            if isinstance(self.lhs, Predicate):
+                if not self.lhs.reverse:
+                    warnings.warn("Input Predicate \"{input_name}\" is not time reversed. Reversing the signal now...".format(input_name=self.lhs.name))
+                    signal = jnp.flip(self.lhs(trace, **kwargs), self.lhs.time_dim)
+                else:
+                    signal = self.lhs(trace, **kwargs)
+
+            else:
+                signal = trace
+
         else:
-            return (self.val - trace) * predicate_scale
+            raise ValueError("Not a invalid input trace")
+
+        if isinstance(self.val, Expression):
+            assert c.value is not None, "Expression does not have numerical values"
+            c_val = c.value
+
+        else:
+            c_val = c
+
+        return (c_val - signal) * predicate_scale
 
     def _next_function(self):
         """ next function is the input subformula. For visualization purposes """
@@ -277,7 +305,7 @@ class LessThan(STL_Formula):
 
     def __str__(self):
         lhs_str = self.lhs
-        if isinstance(self.lhs, Expression):
+        if isinstance(self.lhs, Expression) | isinstance(self.lhs, Predicate):
             lhs_str = self.lhs.name
         if isinstance(self.val, str): # could be a string if robustness_trace is never called
             return lhs_str + " < " + self.val
@@ -297,7 +325,7 @@ class GreaterThan(STL_Formula):
     """
     def __init__(self, lhs='x', val='c'):
         super().__init__()
-        assert isinstance(lhs, str) | isinstance(lhs, Expression), "LHS of expression needs to be a string (input name) or Expression"
+        assert isinstance(lhs, str) | isinstance(lhs, Expression) | isinstance(lhs, Predicate), "LHS of expression needs to be a string (input name) or Expression"
         assert not isinstance(val, str), "val on the rhs cannot be a string"
         self.lhs = lhs
         self.val = val
@@ -308,12 +336,39 @@ class GreaterThan(STL_Formula):
         Computing robustness trace of trace > c
         Optional: scale the robustness by a factor predicate_scale. Default: 1.0
         """
+
+        c = self.val
+
         if isinstance(trace, Expression):
-            trace = trace.value
-        if isinstance(self.val, Expression):
-            return -(self.val.value - trace) * predicate_scale
+            if not trace.reverse:
+                warnings.warn("Input Expression \"{input_name}\" is not time reversed! stljax will time-reverse the signal for you...".format(input_name=trace.name))
+                signal = jnp.flip(trace.value, trace.time_dim)
+            else:
+                signal = trace.value
+
+        elif isinstance(trace, jax.Array):
+
+            if isinstance(self.lhs, Predicate):
+                if not self.lhs.reverse:
+                    warnings.warn("Input Predicate \"{input_name}\" is not time reversed. Reversing the signal now...".format(input_name=self.lhs.name))
+                    signal = jnp.flip(self.lhs(trace, **kwargs), self.lhs.time_dim)
+                else:
+                    signal = self.lhs(trace, **kwargs)
+
+            else:
+                signal = trace
+
         else:
-            return -(self.val - trace) * predicate_scale
+            raise ValueError("Not a invalid input trace")
+
+        if isinstance(self.val, Expression):
+            assert c.value is not None, "Expression does not have numerical values"
+            c_val = c.value
+
+        else:
+            c_val = c
+
+        return -(c_val - signal) * predicate_scale
 
     def _next_function(self):
         """ next function is the input subformula. For visualization purposes """
@@ -321,7 +376,7 @@ class GreaterThan(STL_Formula):
 
     def __str__(self):
         lhs_str = self.lhs
-        if isinstance(self.lhs, Expression):
+        if isinstance(self.lhs, Expression) | isinstance(self.lhs, Predicate):
             lhs_str = self.lhs.name
         if isinstance(self.val, str): # could be a string if robustness_trace is never called
             return lhs_str + " > " + self.val
@@ -342,7 +397,7 @@ class Equal(STL_Formula):
     """
     def __init__(self, lhs='x', val='c'):
         super().__init__()
-        assert isinstance(lhs, str) | isinstance(lhs, Expression), "LHS of expression needs to be a string (input name) or Expression"
+        assert isinstance(lhs, str) | isinstance(lhs, Expression) | isinstance(lhs, Predicate), "LHS of expression needs to be a string (input name) or Expression"
         assert not isinstance(val, str), "val on the rhs cannot be a string"
         self.lhs = lhs
         self.val = val
@@ -353,12 +408,39 @@ class Equal(STL_Formula):
         Computing robustness trace of trace == c
         Optional: scale the robustness by a factor predicate_scale. Default: 1.0
         """
+        c = self.val
+
         if isinstance(trace, Expression):
-            trace = trace.value
-        if isinstance(self.val, Expression):
-            return -jnp.abs(self.val.value - trace) * predicate_scale
+            if not trace.reverse:
+                warnings.warn("Input Expression \"{input_name}\" is not time reversed! stljax will time-reverse the signal for you...".format(input_name=trace.name))
+                signal = jnp.flip(trace.value, trace.time_dim)
+            else:
+                signal = trace.value
+
+        elif isinstance(trace, jax.Array):
+
+            if isinstance(self.lhs, Predicate):
+                if not self.lhs.reverse:
+                    warnings.warn("Input Predicate \"{input_name}\" is not time reversed. Reversing the signal now...".format(input_name=self.lhs.name))
+                    signal = jnp.flip(self.lhs(trace, **kwargs), self.lhs.time_dim)
+                else:
+                    signal = self.lhs(trace, **kwargs)
+
+            else:
+                signal = trace
+
         else:
-            return -jnp.abs(self.val - trace) * predicate_scale
+            raise ValueError("Not a invalid input trace")
+
+        if isinstance(self.val, Expression):
+            assert c.value is not None, "Expression does not have numerical values"
+            c_val = c.value
+
+        else:
+            c_val = c
+
+
+        return -jnp.abs(c_val - signal) * predicate_scale
 
     def _next_function(self):
         """ next function is the input subformula. For visualization purposes """
@@ -366,7 +448,7 @@ class Equal(STL_Formula):
 
     def __str__(self):
         lhs_str = self.lhs
-        if isinstance(self.lhs, Expression):
+        if isinstance(self.lhs, Expression) | isinstance(self.lhs, Predicate):
             lhs_str = self.lhs.name
         if isinstance(self.val, str): # could be a string if robustness_trace is never called
             return lhs_str + " == " + self.val
@@ -424,7 +506,10 @@ class And(STL_Formula):
         if formula.__class__.__name__ != "And":
             return jnp.expand_dims(formula(input_, **kwargs), -1)
         else:
-            return jnp.concatenate([And.separate_and(formula.subformula1, input_[0], **kwargs), And.separate_and(formula.subformula2, input_[1], **kwargs)], axis=-1)
+            if isinstance(input_, tuple):
+                return jnp.concatenate([And.separate_and(formula.subformula1, input_[0], **kwargs), And.separate_and(formula.subformula2, input_[1], **kwargs)], axis=-1)
+            else:
+                return jnp.concatenate([And.separate_and(formula.subformula1, input_, **kwargs), And.separate_and(formula.subformula2, input_, **kwargs)], axis=-1)
 
     def robustness_trace(self, inputs, **kwargs):
         """
@@ -457,14 +542,15 @@ class Or(STL_Formula):
         self.subformula2 = subformula2
 
     @staticmethod
-    def separate_and(formula, input_, **kwargs):
+    def separate_or(formula, input_, **kwargs):
         """
-        Function of seperate out multiple And operations. e.g., ϕ₁ ∨ ϕ₂ ∨ ϕ₃ ∨ ϕ₄ ∨ ...
+        Function of seperate out multiple Or operations. e.g., ϕ₁ ∨ ϕ₂ ∨ ϕ₃ ∨ ϕ₄ ∨ ...
         """
-        if formula.__class__.__name__ != "Or":
-            return jnp.expand_dims(formula(input_, **kwargs), -1)
+        if isinstance(input_, tuple):
+            return jnp.concatenate([Or.separate_or(formula.subformula1, input_[0], **kwargs), Or.separate_or(formula.subformula2, input_[1], **kwargs)], axis=-1)
         else:
-            return jnp.concatenate([Or.separate_and(formula.subformula1, input_[0], **kwargs), Or.separate_and(formula.subformula2, input_[1], **kwargs)], axis=-1)
+            return jnp.concatenate([Or.separate_or(formula.subformula1, input_, **kwargs), Or.separate_or(formula.subformula2, input_, **kwargs)], axis=-1)
+
 
     def robustness_trace(self, inputs, **kwargs):
         """
@@ -723,8 +809,8 @@ class Until(STL_Formula):
         # TODO (karenl7) this really assumes axis=1 is the time dimension. Can this be generalized?
         assert time_dim == 1, "Current implementation assumes time_dim=1"
         LARGE_NUMBER = self.LARGE_NUMBER
-        assert signal[0].shape[time_dim] == signal[1].shape[time_dim]
-        n_time_steps = signal[0].shape[time_dim]
+        # assert signal[0].shape[time_dim] == signal[1].shape[time_dim]
+        n_time_steps = signal[0].shape[time_dim] # TODO: WIP
         trace1 = self.subformula1(signal[0], **kwargs)
         trace2 = self.subformula2(signal[1], **kwargs)
         Alw = Always(subformula=Identity(name=str(self.subformula1)))
@@ -772,11 +858,14 @@ class Expression:
     name: str
     value: jnp.array
     reverse: bool
+    time_dim: int
 
-    def __init__(self, name, value, reverse):
+
+    def __init__(self, name, value, reverse, time_dim=1):
         self.value = value
         self.name = name
         self.reverse = reverse
+        self.time_dim = time_dim
 
     def set_name(self, new_name):
         self.name = new_name
@@ -785,7 +874,14 @@ class Expression:
         self.value = new_value
 
     def flip(self, dim):
+        assert self.value is not None, "Expression does not have numerical values"
         self.value = jnp.flip(self.value, dim)
+        self.reverse = not self.reverse
+        return self.value
+
+    def flip_time(self):
+        assert self.value is not None, "Expression does not have numerical values"
+        self.value = jnp.flip(self.value, self.time_dim)
         self.reverse = not self.reverse
         return self.value
 
@@ -870,18 +966,118 @@ class Expression:
     # def __ne__(lhs, rhs):
     #     raise NotImplementedError("Not supported yet")
 
-    # def __str__(self):
-    #     return str(self.name)
+    def __str__(self):
+        return str(self.name)
 
     def __call__(self):
         return self.value
 
+class Predicate:
+    name: str
+    predicate_function: Callable
+    reverse: bool
+    time_dim: int
+
+    def __init__(self, name, predicate_function=lambda x: x, time_dim=1, reverse=False):
+        self.name = name
+        self.predicate_function = predicate_function
+        self.reverse = reverse
+        self.time_dim = time_dim
+
+    def set_name(self, new_name):
+        self.name = new_name
+
+    def __neg__(self):
+        return Predicate('- ' + self.name, lambda x: -self.predicate_function(x), self.reverse)
+
+    def __add__(self, other):
+        if isinstance(other, Predicate):
+            if self.reverse == other.reverse:
+                return Predicate(self.name + ' + ' + other.name, lambda x: self.predicate_function(x) + other.predicate_function(x), self.reverse)
+            else:
+                raise ValueError("reverse attribute do not match")
+        else:
+            raise ValueError("Type error. Must be Predicate")
+
+    def __radd__(self, other):
+        return self.__add__(other)
+
+    def __sub__(self, other):
+        if isinstance(other, Predicate):
+            if self.reverse == other.reverse:
+                return Predicate(self.name + ' - ' + other.name, lambda x: self.predicate_function(x) - other.predicate_function(x), self.reverse)
+            else:
+                raise ValueError("reverse attribute do not match")
+        else:
+            raise ValueError("Type error. Must be Predicate")
+
+    def __rsub__(self, other):
+        return self.__sub__(other)
+        # No need for the case when "other" is an Expression, since that
+        # case will be handled by the regular sub
+
+    def __mul__(self, other):
+        if isinstance(other, Predicate):
+            if self.reverse == other.reverse:
+                return Predicate(self.name + ' x ' + other.name, lambda x: self.predicate_function(x) * other.predicate_function(x), self.reverse)
+            else:
+                raise ValueError("reverse attribute do not match")
+        else:
+            raise ValueError("Type error. Must be Predicate")
+
+    def __rmul__(self, other):
+        return self.__mul__(other)
+
+    def __truediv__(a, b):
+        if isinstance(a, Predicate) and isinstance(b, Predicate):
+            if a.reverse == b.reverse:
+                return Predicate(a.name + ' / ' + b.name, lambda x: a.predicate_function(x) / b.predicate_function(x), a.reverse)
+            else:
+                raise ValueError("reverse attribute do not match")
+        else:
+            raise ValueError("Type error. Must be Predicate")
+
+    # Comparators
+    def __lt__(lhs, rhs):
+        assert isinstance(lhs, str) | isinstance(lhs, Predicate), "LHS of LessThan needs to be a string or Predicate"
+        assert not isinstance(rhs, str), "RHS cannot be a string"
+        return LessThan(lhs, rhs)
+
+    def __le__(lhs, rhs):
+        assert isinstance(lhs, str) | isinstance(lhs, Predicate), "LHS of LessThan needs to be a string or Predicate"
+        assert not isinstance(rhs, str), "RHS cannot be a string"
+        return LessThan(lhs, rhs)
+
+    def __gt__(lhs, rhs):
+        assert isinstance(lhs, str) | isinstance(lhs, Predicate), "LHS of GreaterThan needs to be a string or Predicate"
+        assert not isinstance(rhs, str), "RHS cannot be a string"
+        return GreaterThan(lhs, rhs)
+
+    def __ge__(lhs, rhs):
+        assert isinstance(lhs, str) | isinstance(lhs, Predicate), "LHS of GreaterThan needs to be a string or Predicate"
+        assert not isinstance(rhs, str), "RHS cannot be a string"
+        return GreaterThan(lhs, rhs)
+
+    def __eq__(lhs, rhs):
+        assert isinstance(lhs, str) | isinstance(lhs, Predicate), "LHS of Equal needs to be a string or Predicate"
+        assert not isinstance(rhs, str), "RHS cannot be a string"
+        return Equal(lhs, rhs)
+
+    def __str__(self):
+        return str(self.name)
+
+    def __call__(self, signal, **kwargs):
+        predicate_output = self.predicate_function(signal)
+        if not self.reverse:
+            return jnp.flip(predicate_output, self.time_dim)
+        else:
+            return predicate_output
 
 def convert_to_input_values(inputs):
     x_, y_ = inputs
     if isinstance(x_, Expression):
         assert x_.value is not None, "Input Expression does not have numerical values"
-        x_ret = x_.value
+        x_ret = x_
     elif isinstance(x_, jax.Array):
         x_ret = x_
     elif isinstance(x_, tuple):
@@ -891,7 +1087,7 @@ def convert_to_input_values(inputs):
 
     if isinstance(y_, Expression):
         assert y_.value is not None, "Input Expression does not have numerical values"
-        y_ret = y_.value
+        y_ret = y_
     elif isinstance(y_, jax.Array):
         y_ret = y_
     elif isinstance(y_, tuple):
