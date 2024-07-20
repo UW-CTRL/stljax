@@ -39,6 +39,65 @@ Aside from using jax as the backend, stljax is more recent and tidier implementa
     - Use `approx_method="gmsr"` and `temperature=(eps, p)`
 
 
+## Quick intro
+
+### Defining STL formulas and computing robustness values
+
+There are two ways to define an STL formula. Using either the `Expression` and `Predicate` classes.
+
+#### Using `Expression`
+With `Expression`, you are essentially defining a signal whose values are the output of a predicate function computed external to the STL robustness computation formula.
+Essentially, you process your desired signal first (e.g., from a state trajectory, you compute velocity), and then you pass it directly into the formula.
+
+A step-by-step break down:\
+1. Suppose you have a `trajectory` that is an array of size `[bs, time_steps, state_dim]`  (not reversed in time)
+
+2. Suppose we have a `get_velocity()`  function and a `get_acceleration()` function:\
+ `velocity_value = get_velocity(trajectory)   # [bs, time_steps, 1]`\
+ `acceleration_value = get_acceleration(trajectory)   # [bs, time_steps, 1]`
+
+3. Then, we can define the following two `Expression` objects:\
+`velocity_exp = Expression("velocity," value=velocity_value, reverse=False, time_dim=1)`\
+`acceleration_exp = Expression("acceleration", value=acceleration_value, reverse=False, time_dim=1)`
+
+4. With these two expressions, we can define an STL formula `ϕ = □ (velocity_exp > 5.0) ∨ ◊ (acceleration_exp > 5.0)` which is equivalent to `ϕ = Always(velocity_exp > 5.0) & Eventually(acceleration_exp > 5.0)`.
+
+5. To compute the robustness trace of `ϕ`, we run `ϕ((velocity_exp, acceleration_exp))` where the input is a _tuple_ since the first part of the formula depends on velocity, and the second part depends on acceleration.
+
+This means that the user needs to compute velocity and acceleration values _before_ calling `ϕ` to compute the robustness trace (or `ϕ.robustness((velocity_exp, acceleration_exp))` for the robustness value)
+
+**NOTE**: Expressions are used to _define_ an STL formula. While you can, you don't necessarily need to use Expressions as inputs for computing robustness values. However it may be convenient as it will automatically handle reversing your signal (if needed). You can directly feed in a `jnp.array`. For example, `ϕ((velocity_array, acceleration_array))` also works. The downside is that the user needs to make sure the inputs are reversed as there is no way for `stljax` to know. The upside is that you can use `jax.jit` and make it run really fast (see demo notebook)!
+
+
+
+##### Using `Predicate`
+With `Predicate`, this is more true to the STL definition. You pass a predicate function when defining an STL formula, rather than passing the signal that would be the output of a predicate function.
+Essentially, you pass your N-D input (e.g., state trajectory) directly into the formula when computing robustness values.
+
+
+A step-by-step break down:\
+1. Suppose you have a `trajectory` that is an array of size `[bs, time_steps, state_dim]`  (not reversed in time)
+
+2. Suppose we have a `get_velocity()`  function and a `get_acceleration()` function:\
+ `velocity_value = get_velocity(trajectory)   # [bs, time_steps, 1]`\
+ `acceleration_value = get_acceleration(trajectory)   # [bs, time_steps, 1]`
+
+3. Then, we can define the following two `Predicate` objects:\
+`velocity_pred = Predicate("velocity", predicate_function=get_velocity, reverse=False, time_dim=1)`\
+`acceleration_pred = Predicate("acceleration", predicate_function=get_acceleration, reverse=False, time_dim=1)`
+
+4. With these two `Predicate` objects, we can define an STL formula `ϕ = □ (velocity_pred > 5.0) ∨ ◊ (acceleration_pred > 5.0)` which is equivalent to `ϕ = Always(velocity_pred > 5.0) & Eventually(acceleration_pred > 5.0)`.
+
+5. To compute the robustness trace of `ϕ`, we run `ϕ(trajectory)` where the input is what all the predicate functions expect the input to be.
+
+
+
+**In summary**:\
+When using Predicates to define STL formulas, it will extract the velocity and acceleration values _inside_ the robustness computation. Whereas when using Expressions, you need to extract the velocity and acceleration _outside_ of the robustness computation.
+
+
+
+
 
 
 ## TODOs
