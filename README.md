@@ -49,7 +49,7 @@ There are two ways to define an STL formula. Using either the `Expression` and `
 With `Expression`, you are essentially defining a signal whose values are the output of a predicate function computed external to the STL robustness computation formula.
 Essentially, you process your desired signal first (e.g., from a state trajectory, you compute velocity), and then you pass it directly into the formula.
 
-A step-by-step break down:\
+A step-by-step break down:
 1. Suppose you have a `trajectory` that is an array of size `[bs, time_steps, state_dim]`  (not reversed in time)
 
 2. Suppose we have a `get_velocity()`  function and a `get_acceleration()` function:\
@@ -70,12 +70,12 @@ This means that the user needs to compute velocity and acceleration values _befo
 
 
 
-##### Using `Predicate`
+#### Using `Predicate`
 With `Predicate`, this is more true to the STL definition. You pass a predicate function when defining an STL formula, rather than passing the signal that would be the output of a predicate function.
 Essentially, you pass your N-D input (e.g., state trajectory) directly into the formula when computing robustness values.
 
 
-A step-by-step break down:\
+A step-by-step break down:
 1. Suppose you have a `trajectory` that is an array of size `[bs, time_steps, state_dim]`  (not reversed in time)
 
 2. Suppose we have a `get_velocity()`  function and a `get_acceleration()` function:\
