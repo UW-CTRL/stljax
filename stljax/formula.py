@@ -2,21 +2,25 @@ import jax
 import jax.numpy as jnp
 import warnings
 from typing import Callable
+import functools
 
 warnings.simplefilter("default")
 
 
 @jax.jit
 def bar_plus(signal, p=2):
+    '''max(0,signal)**p'''
     return jax.nn.relu(signal) ** p
 
 
 @jax.jit
 def bar_minus(signal, p=2):
+    '''min(0,signal)**p'''
     return (-jax.nn.relu(-signal)) ** p
 
-
+@functools.partial(jax.jit, static_argnames=("axis", "keepdims"))
 def M0(signal, eps, weights=None, axis=1, keepdims=True):
+    '''Used in gsmr approx method, Eq 4(a) in https://arxiv.org/abs/2405.10996'''
     if weights is None:
         weights = jnp.ones_like(signal)
     sum_w = weights.sum(axis, keepdims=keepdims)
@@ -24,8 +28,9 @@ def M0(signal, eps, weights=None, axis=1, keepdims=True):
         eps**sum_w + jnp.prod(signal**weights, axis=axis, keepdims=keepdims)
     ) ** (1 / sum_w)
 
-
+@functools.partial(jax.jit, static_argnames=("axis", "keepdims"))
 def Mp(signal, eps, p, weights=None, axis=1, keepdims=True):
+    '''Used in gsmr approx method, Eq 4(b) in https://arxiv.org/abs/2405.10996'''
     if weights is None:
         weights = jnp.ones_like(signal)
     sum_w = weights.sum(axis, keepdims=keepdims)
@@ -33,8 +38,10 @@ def Mp(signal, eps, p, weights=None, axis=1, keepdims=True):
         eps**p + 1 / sum_w * jnp.sum(weights * signal**p, axis=axis, keepdims=keepdims)
     ) ** (1 / p)
 
-
+@functools.partial(jax.jit, static_argnames=("axis", "keepdims"))
 def gmsr_min(signal, eps, p, weights=None, axis=1, keepdims=True):
+    '''Used in gsmr approx method, Eq 3 in https://arxiv.org/abs/2405.10996'''
+
     return (
         M0(bar_plus(signal, 2), eps, weights=weights, axis=axis, keepdims=keepdims)
         ** 0.5
@@ -44,11 +51,13 @@ def gmsr_min(signal, eps, p, weights=None, axis=1, keepdims=True):
         ** 0.5
     )
 
-
+@functools.partial(jax.jit, static_argnames=("axis", "keepdims"))
 def gmsr_max(signal, eps, p, weights=None, axis=1, keepdims=True):
+    '''Used in gsmr approx method, Eq 4(a) but for max in https://arxiv.org/abs/2405.10996'''
+
     return -gmsr_min(-signal, eps, p, weights=weights, axis=axis, keepdims=keepdims)
 
-
+@functools.partial(jax.jit, static_argnames=("axis", "keepdims"))
 def gmsr_min_turbo(signal, eps, p, weights=None, axis=1, keepdims=True):
     # TODO: (norrisg) make actually turbo (faster than normal `gmsr_min`)
     pos_idx = signal > 0.0
@@ -71,7 +80,7 @@ def gmsr_min_turbo(signal, eps, p, weights=None, axis=1, keepdims=True):
         - eps**0.5,
     )
 
-
+@functools.partial(jax.jit, static_argnames=("axis", "keepdims"))
 def gmsr_max_turbo(signal, eps, p, weights=None, axis=1, keepdims=True):
     return -gmsr_min_turbo(
         -signal, eps, p, weights=weights, axis=axis, keepdims=keepdims
@@ -110,7 +119,7 @@ def gmsr_min_fast(signal, eps, p):
 def gmsr_max_fast(signal, eps, p):
     return -gmsr_min_fast(-signal, eps, p)
 
-
+@functools.partial(jax.jit, static_argnames=("axis", "keepdims", "approx_method"))
 def maxish(signal, axis, keepdims=True, approx_method="true", temperature=None, **kwargs):
     """
     Function to compute max(ish) along an axis.
@@ -169,7 +178,7 @@ def maxish(signal, axis, keepdims=True, approx_method="true", temperature=None, 
         case _:
             raise ValueError("Invalid approx_method")
 
-
+@functools.partial(jax.jit, static_argnames=("axis", "keepdims", "approx_method"))
 def minish(signal, axis, keepdims=True, approx_method="true", temperature=None, **kwargs):
     '''
     Same as maxish
@@ -179,6 +188,7 @@ def minish(signal, axis, keepdims=True, approx_method="true", temperature=None, 
 
 class STL_Formula:
     '''
+    Class for an STL formula
     NOTE: If Expressions and Predicates are used, then the signals will be reversed if needed. Otherwise, user is responsibile for keeping track.
     '''
     def __init__(self):
@@ -1117,6 +1127,7 @@ class Predicate:
         return self.predicate_function(signal)
 
 def convert_to_input_values(inputs):
+    '''Converts input into jnp.arrays'''
     if not isinstance(inputs, tuple):
         if isinstance(inputs, Expression):
             assert inputs.value is not None, "Input Expression does not have numerical values"
