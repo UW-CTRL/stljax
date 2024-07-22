@@ -2,6 +2,11 @@ from collections import namedtuple
 from graphviz import Digraph
 import jax
 from stljax.formula import Expression, STL_Formula
+
+'''
+Visualization of STL computation graphs
+'''
+
 Node = namedtuple('Node', ('name', 'inputs', 'attr', 'op'))
 
 
@@ -111,8 +116,7 @@ class Legend:
 
 
 def resize_graph(dot, size_per_element=0.15, min_size=12):
-    """Resize the graph according to how much content it contains.
-    Modify the graph in place.
+    """Resize the graph according to how much content it contains, modify the graph in place.
     """
     # Get the approximate number of nodes and edges
     num_rows = len(dot.body)
@@ -123,4 +127,11 @@ def resize_graph(dot, size_per_element=0.15, min_size=12):
 
 
 def save_graph(dot, filename, format='pdf', cleanup=True):
+    '''
+    Saves STL computation graph
+    Args:
+        dot: graph
+        filename: name of file to save to
+        format: format of file. Default: PDF
+    '''
     dot.render(filename=filename, format=format, cleanup=cleanup)
