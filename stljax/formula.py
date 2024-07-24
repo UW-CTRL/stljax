@@ -867,10 +867,19 @@ class Until(STL_Formula):
         # TODO (karenl7) this really assumes axis=1 is the time dimension. Can this be generalized?
         assert time_dim == 1, "Current implementation assumes time_dim=1"
         LARGE_NUMBER = self.LARGE_NUMBER
-        assert signal[0].shape[time_dim] == signal[1].shape[time_dim]
-        n_time_steps = signal[0].shape[time_dim] # TODO: WIP
-        trace1 = self.subformula1(signal[0], **kwargs)
-        trace2 = self.subformula2(signal[1], **kwargs)
+
+        if isinstance(signal, tuple):
+            # for formula defined using Expression
+            assert signal[0].shape[time_dim] == signal[1].shape[time_dim]
+            trace1 = self.subformula1(signal[0], **kwargs)
+            trace2 = self.subformula2(signal[1], **kwargs)
+            n_time_steps = signal[0].shape[time_dim] # TODO: WIP
+        else:
+            # for formula defined using Predicate
+            trace1 = self.subformula1(signal, **kwargs)
+            trace2 = self.subformula2(signal, **kwargs)
+            n_time_steps = signal.shape[time_dim] # TODO: WIP
+
         Alw = Always(subformula=Identity(name=str(self.subformula1)))
         # TODO (karenl7) this really assumes axis=1 is the time dimension. Can this be generalized?
         LHS = jnp.permute_dims(jnp.repeat(jnp.expand_dims(trace2, -1), n_time_steps, axis=-1), [0,3,2,1])  # [bs, sub_signal, state, t_prime]
