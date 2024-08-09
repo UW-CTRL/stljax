@@ -572,11 +572,18 @@ class Or(STL_Formula):
             formula: STL_formula
             input_: input of STL_formula
         """
-        if isinstance(input_, tuple):
-            return jnp.concatenate([Or.separate_or(formula.subformula1, input_[0], **kwargs), Or.separate_or(formula.subformula2, input_[1], **kwargs)], axis=-1)
-        else:
-            return jnp.concatenate([Or.separate_or(formula.subformula1, input_, **kwargs), Or.separate_or(formula.subformula2, input_, **kwargs)], axis=-1)
+        # if isinstance(input_, tuple):
+        #     return jnp.concatenate([Or.separate_or(formula.subformula1, input_[0], **kwargs), Or.separate_or(formula.subformula2, input_[1], **kwargs)], axis=-1)
+        # else:
+        #     return jnp.concatenate([Or.separate_or(formula.subformula1, input_, **kwargs), Or.separate_or(formula.subformula2, input_, **kwargs)], axis=-1)
 
+        if formula.__class__.__name__ != "Or":
+            return jnp.expand_dims(formula(input_, **kwargs), -1)
+        else:
+            if isinstance(input_, tuple):
+                return jnp.concatenate([Or.separate_or(formula.subformula1, input_[0], **kwargs), Or.separate_or(formula.subformula2, input_[1], **kwargs)], axis=-1)
+            else:
+                return jnp.concatenate([Or.separate_or(formula.subformula1, input_, **kwargs), Or.separate_or(formula.subformula2, input_, **kwargs)], axis=-1)
 
     def robustness_trace(self, inputs, **kwargs):
         """
@@ -623,11 +630,16 @@ class Implies(STL_Formula):
         Returns:
             robustness_trace: jnp.array. Same size as signal.
         """
-        trace1, trace2 = trace
-        signal1 = self.subformula1(trace1, **kwargs)
-        signal2 = self.subformula2(trace2, **kwargs)
+        if isinstance(trace, tuple):
+            trace1, trace2 = trace
+            signal1 = self.subformula1(trace1, **kwargs)
+            signal2 = self.subformula2(trace2, **kwargs)
+        else:
+            signal1 = self.subformula1(trace, **kwargs)
+            signal2 = self.subformula2(trace, **kwargs)
         xx = jnp.stack([-signal1, signal2], axis=-1)      # [batch_size, time_dim, ..., 2]
         return maxish(xx, axis=-1, keepdims=False, **kwargs)   # [batch_size, time_dim, ...]
+
 
     def _next_function(self):
         """ next function is the input subformulas. For visualization purposes """
