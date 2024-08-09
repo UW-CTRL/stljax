@@ -589,7 +589,7 @@ class Or(STL_Formula):
         Returns:
             robustness_trace: jnp.array. Same size as signal.
         """
-        xx = Or.separate_and(self, inputs, **kwargs)
+        xx = Or.separate_or(self, inputs, **kwargs)
         return maxish(xx, axis=-1, keepdims=False, **kwargs)                                         # [batch_size, time_dim, ...]
 
     def _next_function(self):
