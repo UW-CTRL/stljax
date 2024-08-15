@@ -119,7 +119,7 @@ def gmsr_min_fast(signal, eps, p):
 def gmsr_max_fast(signal, eps, p):
     return -gmsr_min_fast(-signal, eps, p)
 
-@functools.partial(jax.jit, static_argnames=("axis", "keepdims", "approx_method"))
+@functools.partial(jax.jit, static_argnames=("axis", "keepdims", "approx_method", "padding"))
 def maxish(signal, axis, keepdims=True, approx_method="true", temperature=None, **kwargs):
     """
     Function to compute max(ish) along an axis.
@@ -178,7 +178,7 @@ def maxish(signal, axis, keepdims=True, approx_method="true", temperature=None, 
         case _:
             raise ValueError("Invalid approx_method")
 
-@functools.partial(jax.jit, static_argnames=("axis", "keepdims", "approx_method"))
+@functools.partial(jax.jit, static_argnames=("axis", "keepdims", "approx_method", "padding"))
 def minish(signal, axis, keepdims=True, approx_method="true", temperature=None, **kwargs):
     '''
     Same as maxish
@@ -760,7 +760,7 @@ class Temporal_Operator(STL_Formula):
         """ next function is the input subformula. For visualization purposes """
         return [self.subformula]
 
-class Always(Temporal_Operator):
+class AlwaysRecurrent(Temporal_Operator):
     """
     The Always STL formula □_[a,b] subformula
     The robustness value is the minimum value of the input trace over a prespecified time interval
@@ -801,7 +801,7 @@ class Always(Temporal_Operator):
         return "◻ " + str(self._interval) + "( " + str(self.subformula) + " )"
 
 
-class Eventually(Temporal_Operator):
+class EventuallyRecurrent(Temporal_Operator):
     """
     The Eventually STL formula ♢_[a,b] subformula
     The robustness value is the minimum value of the input trace over a prespecified time interval
@@ -843,7 +843,7 @@ class Eventually(Temporal_Operator):
         return "♢ " + str(self._interval) + "( " + str(self.subformula) + " )"
 
 
-class Until(STL_Formula):
+class UntilRecurrent(STL_Formula):
     """
     The Until STL operator U. Subformula1 U_[a,b] subformula2
     Arg:
@@ -1160,3 +1160,108 @@ def convert_to_input_values(inputs):
             raise ValueError("Not a invalid input trace")
     else:
         return (convert_to_input_values(inputs[0]), convert_to_input_values(inputs[1]))
+
+
+class Eventually(STL_Formula):
+    def __init__(self, subformula, interval=None):
+        super().__init__()
+
+        self.interval = interval
+        self.subformula = subformula
+
+    def robustness_trace(self, signal, time_dim=0, padding="last", large_number=1E9, **kwargs):
+        signal = self.subformula(signal, time_dim=time_dim, padding=padding, large_number=large_number, **kwargs)
+        T = signal.shape[time_dim]
+        mask_value = -large_number
+        if self.interval is None:
+            interval = [0,T]
+        else:
+            interval = self.interval
+        signal_matrix = signal.reshape([T,1]) @ jnp.ones([1,T])
+        if padding == "last":
+            pad_value = signal[-1]
+        elif padding == "mean":
+            pad_value = signal.mean(time_dim)
+        else:
+            pad_value = padding
+        signal_pad = jnp.ones([interval[1]+1, T]) * pad_value
+        signal_padded = jnp.concatenate([signal_matrix, signal_pad], axis=time_dim)
+        subsignal_mask = jnp.tril(jnp.ones([T + interval[1]+1,T]))
+        time_interval_mask = jnp.triu(jnp.ones([T + interval[1]+1,T]), -interval[-1]) * jnp.tril(jnp.ones([T + interval[1]+1,T]), -interval[0])
+        masked_signal_matrix = jnp.where(time_interval_mask * subsignal_mask, signal_padded, mask_value)
+        return maxish(masked_signal_matrix, axis=time_dim, keepdims=False, **kwargs)
+
+class Always(STL_Formula):
+    def __init__(self, subformula, interval=None):
+        super().__init__()
+
+        self.interval = interval
+        self.subformula = subformula
+
+    def robustness_trace(self, signal, time_dim=0, padding="last", large_number=1E9, **kwargs):
+        signal = self.subformula(signal, time_dim=time_dim, padding=padding, large_number=large_number, **kwargs)
+        T = signal.shape[time_dim]
+        mask_value = large_number
+        if self.interval is None:
+            interval = [0,T]
+        else:
+            interval = self.interval
+        signal_matrix = signal.reshape([T,1]) @ jnp.ones([1,T])
+        if padding == "last":
+            pad_value = signal[-1]
+        elif padding == "mean":
+            pad_value = signal.mean(time_dim)
+        else:
+            pad_value = padding
+        signal_pad = jnp.ones([interval[1]+1, T]) * pad_value
+        signal_padded = jnp.concatenate([signal_matrix, signal_pad], axis=time_dim)
+        subsignal_mask = jnp.tril(jnp.ones([T + interval[1]+1,T]))
+        time_interval_mask = jnp.triu(jnp.ones([T + interval[1]+1,T]), -interval[-1]) * jnp.tril(jnp.ones([T + interval[1]+1,T]), -interval[0])
+        masked_signal_matrix = jnp.where(time_interval_mask * subsignal_mask, signal_padded, mask_value)
+        return minish(masked_signal_matrix, axis=time_dim, keepdims=False, **kwargs)
+
+
+class Until(STL_Formula):
+    def __init__(self, subformula1, subformula2, interval):
+        super().__init__()
+        self.subformula1 = subformula1
+        self.subformula2 = subformula2
+        self.interval = interval
+
+
+    def robustness_trace(self, signal, time_dim=0, padding="last", large_number=1E9, **kwargs):
+        if isinstance(signal, tuple):
+            signal1, signal2 = signal
+            signal1 = self.subformula1(signal1, time_dim=time_dim, padding=padding, large_number=large_number, **kwargs)
+            signal2 = self.subformula2(signal2, time_dim=time_dim, padding=padding, large_number=large_number, **kwargs)
+        else:
+            signal1 = self.subformula1(signal, time_dim=time_dim, padding=padding, large_number=large_number, **kwargs)
+            signal2 = self.subformula2(signal, time_dim=time_dim, padding=padding, large_number=large_number, **kwargs)
+
+        T = signal.shape[time_dim]
+        mask_value = large_number
+        if self.interval is None:
+            interval = [0,T]
+        else:
+            interval = self.interval
+        signal1_matrix = signal1.reshape([T,1]) @ jnp.ones([1,T])
+        signal2_matrix = signal2.reshape([T,1]) @ jnp.ones([1,T])
+        if padding == "last":
+            signal1_pad = jnp.ones([interval[1]+1, T]) * signal1[-1]
+            signal2_pad = jnp.ones([interval[1]+1, T]) * signal2[-1]
+        elif padding == "mean":
+            signal1_pad = jnp.ones([interval[1]+1, T]) * signal1.mean(time_dim)
+            signal2_pad = jnp.ones([interval[1]+1, T]) * signal2.mean(time_dim)
+        else:
+            signal1_pad = jnp.ones([interval[1]+1, T]) * padding
+            signal2_pad = jnp.ones([interval[1]+1, T]) * padding
+
+        signal1_padded = jnp.concatenate([signal1_matrix, signal1_pad], axis=time_dim)
+        signal2_padded = jnp.concatenate([signal2_matrix, signal2_pad], axis=time_dim)
+
+        start_idx = interval[0]
+        phi1_mask = jnp.stack([jnp.triu(jnp.ones([T + interval[1]+1,T]), -end_idx) * jnp.tril(jnp.ones([T + interval[1]+1,T]), -start_idx) for end_idx in range(interval[0], interval[-1]+1)], 0)
+        phi2_mask = jnp.stack([jnp.triu(jnp.ones([T + interval[1]+1,T]), -end_idx) * jnp.tril(jnp.ones([T + interval[1]+1,T]), -end_idx) for end_idx in range(interval[0], interval[-1]+1)], 0)
+        phi1_masked_signal = jnp.stack([jnp.where(m1, signal1_padded, mask_value) for m1 in phi1_mask], 0)
+        phi2_masked_signal = jnp.stack([jnp.where(m2, signal2_padded, mask_value) for m2 in phi2_mask], 0)
+        return maxish(jnp.stack([minish(jnp.stack([minish(s1, axis=0, keepdims=False), minish(s2, axis=0, keepdims=False)], axis=0), axis=0, keepdims=False) for (s1, s2) in zip(phi1_masked_signal, phi2_masked_signal)], axis=0), axis=0, keepdims=False)
