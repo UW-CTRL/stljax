@@ -17,7 +17,7 @@ if __name__ == "__main__":
 
 
     axis = 0
-    pred_rev = Predicate('x', lambda x: x, axis, True)
+    pred_rev = Predicate('x', lambda x: x)
     interval = [2, 5]
     mask = Always(pred_rev > 4, interval=interval)
     recurrent = AlwaysRecurrent(pred_rev > 4, interval=interval)
@@ -59,8 +59,10 @@ if __name__ == "__main__":
     stds = []
     data = {}
 
-    # functions = ["mask_", "recurrent_", "grad_mask", "grad_recurrent", "mask_jit", "recurrent_jit", "grad_mask_jit", "grad_recurrent_jit"]
-    functions = ["mask_jit", "recurrent_jit", "grad_mask_jit", "grad_recurrent_jit"]
+    functions = ["mask_", "recurrent_", "grad_mask", "grad_recurrent", "mask_jit", "recurrent_jit", "grad_mask_jit", "grad_recurrent_jit"]
+    # functions = ["mask_jit", "recurrent_jit", "grad_mask_jit", "grad_recurrent_jit"]
+    # functions = ["mask_jit", "grad_mask_jit"]
+
     Ts = []
     data["functions"] = functions
     data["runs"] = runs

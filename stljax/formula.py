@@ -325,11 +325,7 @@ class LessThan(STL_Formula):
             c_val = self.val
 
         if isinstance(self.lhs, Predicate):
-            if not self.lhs.reverse:
-                warnings.warn("Input Predicate \"{input_name}\" is not time reversed. Reversing the signal now...".format(input_name=self.lhs.name))
-                return (c_val - jnp.flip(self.lhs(signal), self.lhs.time_dim)) * predicate_scale
-            else:
-                return (c_val - self.lhs(signal)) * predicate_scale
+            return (c_val - self.lhs(signal)) * predicate_scale
         else:
             return (c_val - signal) * predicate_scale
 
@@ -384,11 +380,7 @@ class GreaterThan(STL_Formula):
             c_val = self.val
 
         if isinstance(self.lhs, Predicate):
-            if not self.lhs.reverse:
-                warnings.warn("Input Predicate \"{input_name}\" is not time reversed. Reversing the signal now...".format(input_name=self.lhs.name))
-                return -(c_val - jnp.flip(self.lhs(trace), self.lhs.time_dim)) * predicate_scale
-            else:
-                return -(c_val - self.lhs(trace)) * predicate_scale
+            return -(c_val - self.lhs(trace)) * predicate_scale
         else:
             return -(c_val - trace) * predicate_scale
 
@@ -443,11 +435,7 @@ class Equal(STL_Formula):
             c_val = self.val
 
         if isinstance(self.lhs, Predicate):
-            if not self.lhs.reverse:
-                warnings.warn("Input Predicate \"{input_name}\" is not time reversed. Reversing the signal now...".format(input_name=self.lhs.name))
-                return -jnp.abs(c_val - jnp.flip(self.lhs(trace), self.lhs.time_dim)) * predicate_scale
-            else:
-                return -jnp.abs(c_val - self.lhs(trace)) * predicate_scale
+            return -jnp.abs(c_val - self.lhs(trace)) * predicate_scale
         else:
             return -jnp.abs(c_val - trace) * predicate_scale
 
@@ -931,13 +919,11 @@ class UntilRecurrent(STL_Formula):
 class Expression:
     name: str
     value: jnp.array
-    reverse: bool
     time_dim: int
 
     def __init__(self, name, value, reverse, time_dim=1):
         self.value = value
         self.name = name
-        self.reverse = reverse
         self.time_dim = time_dim
 
     def set_name(self, new_name):
@@ -946,41 +932,23 @@ class Expression:
     def set_value(self, new_value):
         self.value = new_value
 
-    def flip(self, dim):
-        assert self.value is not None, "Expression does not have numerical values"
-        self.value = jnp.flip(self.value, dim)
-        self.reverse = not self.reverse
-        return self.value
-
-    def flip_time(self):
-        assert self.value is not None, "Expression does not have numerical values"
-        self.value = jnp.flip(self.value, self.time_dim)
-        self.reverse = not self.reverse
-        return self.value
-
     def __neg__(self):
-        return Expression('-' + self.name, -self.value, self.reverse)
+        return Expression('-' + self.name, -self.value)
 
     def __add__(self, other):
         if isinstance(other, Expression):
-            if self.reverse == other.reverse:
-                return Expression(self.name + ' + ' + other.name, self.value + other.value, self.reverse)
-            else:
-                raise ValueError("reverse attribute do not match")
+            return Expression(self.name + ' + ' + other.name, self.value + other.value)
         else:
-            return Expression(self.name + ' + other', self.value + other, self.reverse)
+            return Expression(self.name + ' + other', self.value + other)
 
     def __radd__(self, other):
         return self.__add__(other)
 
     def __sub__(self, other):
         if isinstance(other, Expression):
-            if self.reverse == other.reverse:
-                return Expression(self.name + ' - ' + other.name, self.value - other.value, self.reverse)
-            else:
-                raise ValueError("reverse attribute do not match")
+            return Expression(self.name + ' - ' + other.name, self.value - other.value)
         else:
-            return Expression(self.name + " - other", self.value - other, self.reverse)
+            return Expression(self.name + " - other", self.value - other)
 
     def __rsub__(self, other):
         return self.__sub__(other)
@@ -989,12 +957,9 @@ class Expression:
 
     def __mul__(self, other):
         if isinstance(other, Expression):
-            if self.reverse == other.reverse:
-                return Expression(self.name + ' × ' + other.name, self.value * other.value, self.reverse)
-            else:
-                raise ValueError("reverse attribute do not match")
+            return Expression(self.name + ' × ' + other.name, self.value * other.value)
         else:
-            return Expression(self.name + " * other", self.value * other, self.reverse)
+            return Expression(self.name + " * other", self.value * other)
 
 
     def __rmul__(self, other):
@@ -1004,10 +969,7 @@ class Expression:
         # This is the new form required by Python 3
         numerator = a
         denominator = b
-        if numerator.reverse == denominator.reverse:
-            return Expression(numerator.name + '/' + denominator.name, numerator.value/denominator.value, denominator.reverse)
-        else:
-            raise ValueError("reverse attribute do not match")
+        return Expression(numerator.name + '/' + denominator.name, numerator.value/denominator.value)
 
 
     # Comparators
@@ -1048,27 +1010,22 @@ class Expression:
 class Predicate:
     name: str
     predicate_function: Callable
-    reverse: bool
     time_dim: int
 
     def __init__(self, name, predicate_function=lambda x: x, time_dim=1, reverse=False):
         self.name = name
         self.predicate_function = predicate_function
-        self.reverse = reverse
         self.time_dim = time_dim
 
     def set_name(self, new_name):
         self.name = new_name
 
     def __neg__(self):
-        return Predicate('- ' + self.name, lambda x: -self.predicate_function(x), self.reverse)
+        return Predicate('- ' + self.name, lambda x: -self.predicate_function(x))
 
     def __add__(self, other):
         if isinstance(other, Predicate):
-            if self.reverse == other.reverse:
-                return Predicate(self.name + ' + ' + other.name, lambda x: self.predicate_function(x) + other.predicate_function(x), self.reverse)
-            else:
-                raise ValueError("reverse attribute do not match")
+            return Predicate(self.name + ' + ' + other.name, lambda x: self.predicate_function(x) + other.predicate_function(x))
         else:
             raise ValueError("Type error. Must be Predicate")
 
@@ -1077,10 +1034,7 @@ class Predicate:
 
     def __sub__(self, other):
         if isinstance(other, Predicate):
-            if self.reverse == other.reverse:
-                return Predicate(self.name + ' - ' + other.name, lambda x: self.predicate_function(x) - other.predicate_function(x), self.reverse)
-            else:
-                raise ValueError("reverse attribute do not match")
+            return Predicate(self.name + ' - ' + other.name, lambda x: self.predicate_function(x) - other.predicate_function(x))
         else:
             raise ValueError("Type error. Must be Predicate")
 
@@ -1091,10 +1045,7 @@ class Predicate:
 
     def __mul__(self, other):
         if isinstance(other, Predicate):
-            if self.reverse == other.reverse:
-                return Predicate(self.name + ' x ' + other.name, lambda x: self.predicate_function(x) * other.predicate_function(x), self.reverse)
-            else:
-                raise ValueError("reverse attribute do not match")
+            return Predicate(self.name + ' x ' + other.name, lambda x: self.predicate_function(x) * other.predicate_function(x))
         else:
             raise ValueError("Type error. Must be Predicate")
 
@@ -1103,10 +1054,7 @@ class Predicate:
 
     def __truediv__(a, b):
         if isinstance(a, Predicate) and isinstance(b, Predicate):
-            if a.reverse == b.reverse:
-                return Predicate(a.name + ' / ' + b.name, lambda x: a.predicate_function(x) / b.predicate_function(x), a.reverse)
-            else:
-                raise ValueError("reverse attribute do not match")
+            return Predicate(a.name + ' / ' + b.name, lambda x: a.predicate_function(x) / b.predicate_function(x))
         else:
             raise ValueError("Type error. Must be Predicate")
 
@@ -1148,12 +1096,7 @@ def convert_to_input_values(inputs):
         if isinstance(inputs, Expression):
             assert inputs.value is not None, "Input Expression does not have numerical values"
             # if Expression is not time reversed
-            if not inputs.reverse:
-                # throw warning to the user
-                warnings.warn("Input Expression \"{input_name}\" is not time reversed! stljax will time-reverse the inputs for you...".format(input_name=inputs.name))
-                return jnp.flip(inputs.value, inputs.time_dim)
-            else:
-                return inputs.value
+            return inputs.value
         elif isinstance(inputs, jax.Array):
             return inputs
         else:
