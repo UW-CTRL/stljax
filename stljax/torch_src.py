@@ -2,8 +2,11 @@ import torch
 import numpy as np
 import os
 import sys
-from base_types import Expression, Minish, Maxish
+from .base_types import Expression, Minish, Maxish
 # from torchviz import make_dot
+# Set the device based on runtime
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def convert_to_input_values(inputs):
     '''
@@ -208,15 +211,13 @@ class Always(STL_Formula):
         signal = self.subformula(signal, time_dim=time_dim, padding=padding, large_number=large_number, **kwargs)
         T = signal.shape[time_dim]
         mask_value = large_number
-
+        
         if self.interval is None:
             interval = [0, T]
         else:
             interval = self.interval
 
-    
-        signal_matrix = signal.view(T, 1) * torch.ones(1, T)
-
+        signal_matrix = signal.view(T, 1) * torch.ones(1, T, device=device)
 
         if padding == "last":
             pad_value = signal[-1]
@@ -225,16 +226,14 @@ class Always(STL_Formula):
         else:
             pad_value = padding
 
-
-        signal_pad = torch.ones(interval[1] + 1, T) * pad_value
+        signal_pad = torch.ones(interval[1] + 1, T, device=device) * pad_value
         signal_padded = torch.cat([signal_matrix, signal_pad], dim=time_dim)
 
-        subsignal_mask = torch.tril(torch.ones(T + interval[1] + 1, T))
-        time_interval_mask = torch.triu(torch.ones(T + interval[1] + 1, T), -interval[-1]) * torch.tril(torch.ones(T + interval[1] + 1, T), -interval[0])
+        subsignal_mask = torch.tril(torch.ones(T + interval[1] + 1, T, device=device))
+        time_interval_mask = torch.triu(torch.ones(T + interval[1] + 1, T, device=device), -interval[-1]) * torch.tril(torch.ones(T + interval[1] + 1, T, device=device), -interval[0])
 
-        masked_signal_matrix = torch.where((time_interval_mask * subsignal_mask).bool(), signal_padded, torch.tensor(mask_value, dtype=signal_padded.dtype))
+        masked_signal_matrix = torch.where((time_interval_mask * subsignal_mask).bool(), signal_padded, torch.tensor(mask_value, dtype=signal_padded.dtype, device=device))
 
-        # Return the minimum value across the time dimension
         return self.operation(masked_signal_matrix, scale=large_number, dim=time_dim, keepdim=False, **kwargs)
 
     def forward(self, signal: torch.Tensor, **kwargs) -> torch.Tensor:
@@ -267,23 +266,22 @@ class Eventually(STL_Formula):
         else:
             interval = self.interval
 
-        signal_matrix = signal.view(T, 1) * torch.ones(1, T)
-  
+        signal_matrix = signal.view(T, 1) * torch.ones(1, T, device=device)
+
         if padding == "last":
             pad_value = signal[-1]
         elif padding == "mean":
             pad_value = signal.mean(dim=time_dim)
         else:
             pad_value = padding
-    
-        signal_pad = torch.ones(interval[1] + 1, T) * pad_value
+
+        signal_pad = torch.ones(interval[1] + 1, T, device=device) * pad_value
         signal_padded = torch.cat([signal_matrix, signal_pad], dim=time_dim)
 
-        subsignal_mask = torch.tril(torch.ones(T + interval[1] + 1, T))
-        time_interval_mask = torch.triu(torch.ones(T + interval[1] + 1, T), -interval[-1]) * torch.tril(torch.ones(T + interval[1] + 1, T), -interval[0])
+        subsignal_mask = torch.tril(torch.ones(T + interval[1] + 1, T, device=device))
+        time_interval_mask = torch.triu(torch.ones(T + interval[1] + 1, T, device=device), -interval[-1]) * torch.tril(torch.ones(T + interval[1] + 1, T, device=device), -interval[0])
 
-        masked_signal_matrix = torch.where((time_interval_mask * subsignal_mask).bool(), signal_padded, torch.tensor(mask_value, dtype=signal_padded.dtype))
-
+        masked_signal_matrix = torch.where((time_interval_mask * subsignal_mask).bool(), signal_padded, torch.tensor(mask_value, dtype=signal_padded.dtype, device=device))
 
         return self.operation(masked_signal_matrix, scale=large_number, dim=time_dim, keepdim=False, **kwargs)
 
@@ -300,9 +298,9 @@ class trial(STL_Formula):
         # # self.neg = Negation(self.lt)
         # self.and_ = And(self.gt, self.lt)
 
-        self.always = Always(GreaterThan('x', torch.tensor([0.5])))
+        self.always = Always(GreaterThan('x', torch.tensor([0.5]).to('cuda')))
 
-        self.eventually = Eventually(GreaterThan('x', torch.tensor([0.5])))
+        self.eventually = Eventually(GreaterThan('x', torch.tensor([0.5]).to('cuda')))
 
     def robustness_trace(self, signal:torch.Tensor, **kwargs)->torch.Tensor:
         # x = self.lt(signal)
@@ -318,6 +316,8 @@ class trial(STL_Formula):
 
     def forward(self, signal:torch.Tensor, **kwargs)->torch.Tensor:
         return self.robustness_trace(signal, **kwargs)
+
+
 
 if __name__ == "__main__":
     x = torch.tensor([0.6, 0.3, 0.2, 0.5, 0.6, 0.7])
