@@ -197,17 +197,22 @@ class Eventually(STL_Formula):
 
 
 class trial(STL_Formula):
-    def __init__(self):
+    def __init__(self, x_val, y_val):
         super().__init__()
-        self.always = Always(GreaterThan('x', torch.tensor([0.5], device=device)))
-        self.eventually = Eventually(GreaterThan('x', torch.tensor([0.5], device=device)))
+        #self.always = Always(GreaterThan('x', torch.tensor([0.5], device=device)))
+        self.eventually_x = Eventually(GreaterThan('x', torch.tensor([x_val], device=device)))
+        self.eventually_y= Eventually(GreaterThan('y', torch.tensor([y_val], device=device)))
+        self.dis = And(self.eventually_x, self.eventually_y)
+
 
     def robustness_trace(self, signal:torch.Tensor, **kwargs)->torch.Tensor:
         """
         Batched input handling: Assumes signal of shape [batch_size, time_dim, ...]
         """
-        y = self.eventually(signal)
-        return y
+        x = signal[:, :, 0]
+        y = signal[:, :, 1]
+        final = self.dis([x,y])
+        return final
 
     def forward(self, signal:torch.Tensor, **kwargs)->torch.Tensor:
         return self.robustness_trace(signal, **kwargs)
@@ -216,6 +221,10 @@ if __name__ == "__main__":
     # Example input with batch_size=2, time_dim=6
     x = torch.tensor([[0.6, 0.3, 0.2, 0.5, 0.6, 0.7],
                       [0.4, 0.8, 0.1, 0.3, 0.2, 0.9]], device=device)
-    model = trial()
-    y = model(x)
+    y = torch.tensor([[0.6, 0.3, 0.2, 0.5, 0.6, 0.7],
+                      [0.4, 0.8, 0.1, 0.3, 0.2, 0.9]], device=device)
+    stack = torch.stack([x, y], dim=-1)
+    print(stack.shape)
+    model = trial(0.5, 0.5)
+    y = model(stack)
     print(y)
