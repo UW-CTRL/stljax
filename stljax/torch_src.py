@@ -2,7 +2,7 @@ import torch
 import numpy as np
 import os
 import sys
-from .base_types import Expression, Minish, Maxish
+from stljax.base_types import Expression, Minish, Maxish
 # from torchviz import make_dot
 # Set the device based on runtime
 
@@ -42,7 +42,7 @@ class STL_Formula(torch.nn.Module):
     def robustness_trace(self, signal, **kwargs):
         raise NotImplementedError("robustness_trace not yet implemented")
 
-    def robustness(self, signal, time_dim, **kwargs):
+    def robustness(self, signal, time_dim=0, **kwargs):
         '''
         Extracts the robustness_trace value at the given time.
         Default: time=0 assuming this is the index for the NON-REVERSED trace. But the code will take it from the end since the input signal is TIME REVERSED.
