@@ -1,5 +1,4 @@
 import numpy as np
-# from stljax.base_types import Expression, Minish, Maxish
 from stljax.torch_src import *
 import matplotlib.pyplot as plt
 import timeit
