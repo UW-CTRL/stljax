@@ -208,7 +208,7 @@ class STL_Formula:
 
         raise NotImplementedError("robustness_trace not yet implemented")
 
-    def robustness(self, signal, time_dim, **kwargs):
+    def robustness(self, signal, **kwargs):
         """
         Computes the robustness value. Extracts the last entry along time_dim of robustness trace.
 
@@ -218,9 +218,8 @@ class STL_Formula:
 
         Return: jnp.array, same as input with the time_dim removed.
         """
-
-        kwargs["time_dim"] = time_dim
-        return jnp.rollaxis(self.__call__(signal, **kwargs), time_dim)[-1]
+        return self.__call__(signal, **kwargs)[0]
+        # return jnp.rollaxis(self.__call__(signal, **kwargs), time_dim)[-1]
 
     def eval_trace(self, signal, **kwargs):
         """
@@ -236,7 +235,7 @@ class STL_Formula:
 
         return self.__call__(signal, **kwargs) > 0
 
-    def eval(self, signal, time_dim, **kwargs):
+    def eval(self, signal, **kwargs):
         """
         Boolean of robustness
 
@@ -246,7 +245,7 @@ class STL_Formula:
 
         Return: jnp.array with True/False, same as input with the time_dim removed.
         """
-        return self.robustness(signal, time_dim, **kwargs) > 0
+        return self.robustness(signal, **kwargs) > 0
 
 
     def __call__(self, signal, **kwargs):
@@ -680,7 +679,8 @@ class Temporal_Operator(STL_Formula):
         # Case 1, 2, 4
         # TODO: make this less hard-coded. Assumes signal is [bs, time_dim, signal_dim], and already reversed
         # pads with the signal value at the last time step.
-        h0 = jnp.ones([self.hidden_dim, *signal.shape[1:]])*signal[:1]
+        y = jax.lax.stop_gradient(signal[:1])
+        h0 = jnp.ones([self.hidden_dim, *signal.shape[1:]])*y
 
         # Case 3: if self.interval is [a, jnp.inf), then the hidden state is a tuple (like in an LSTM)
         if (self._interval[1] == jnp.inf) & (self._interval[0] > 0):
@@ -688,7 +688,7 @@ class Temporal_Operator(STL_Formula):
             return (c0, h0)
         return h0
 
-    def _cell(self, x, hidden_state, time_dim=1, **kwargs):
+    def _cell(self, x, hidden_state, **kwargs):
         """
         This function describes the operation that takes place at each recurrent step.
         Args:
@@ -701,7 +701,7 @@ class Temporal_Operator(STL_Formula):
         raise NotImplementedError("_cell is not implemented")
 
 
-    def _run_cell(self, signal, time_dim=0, **kwargs):
+    def _run_cell(self, signal, **kwargs):
         """
         Function to run a signal through a cell T times, where T is the length of the signal in the time dimension
 
@@ -714,19 +714,19 @@ class Temporal_Operator(STL_Formula):
             outputs: list of outputs
             states: list of hidden_states
         """
-
+        time_dim = 0  # assuming signal is [time_dim,...]
         outputs = []
         states = []
         hidden_state = self._initialize_hidden_state(signal)                               # [hidden_dim]
         signal_split = jnp.split(signal, signal.shape[time_dim], time_dim)    # list of x at each time step
         for i in range(signal.shape[time_dim]):
-            o, hidden_state = self._cell(signal_split[i], hidden_state, time_dim, **kwargs)
+            o, hidden_state = self._cell(signal_split[i], hidden_state, **kwargs)
             outputs.append(o)
             states.append(hidden_state)
         return outputs, states
 
 
-    def robustness_trace(self, signal, time_dim=0, **kwargs):
+    def robustness_trace(self, signal, **kwargs):
         """
         Function to compute robustness trace of a temporal STL formula
         First, compute the robustness trace of the subformula, and use that as the input for the recurrent computation
@@ -739,9 +739,9 @@ class Temporal_Operator(STL_Formula):
         Returns:
             robustness_trace: jnp.array. Same size as signal.
         """
-
+        time_dim = 0  # assuming signal is [time_dim,...]
         trace = self.subformula(signal, **kwargs)
-        outputs, _ = self._run_cell(trace, time_dim, **kwargs)
+        outputs, _ = self._run_cell(trace, **kwargs)
         return jnp.concatenate(outputs, axis=time_dim)                              # [time_dim, ]
 
     def _next_function(self):
@@ -760,10 +760,11 @@ class AlwaysRecurrent(Temporal_Operator):
     def __init__(self, subformula, interval=None):
         super().__init__(subformula=subformula, interval=interval)
 
-    def _cell(self, x, hidden_state, time_dim, **kwargs):
+    def _cell(self, x, hidden_state, **kwargs):
         """
         see Temporal_Operator._cell
         """
+        time_dim = 0  # assuming signal is [time_dim,...]
         # Case 1, interval = [0, inf]
         if self.interval is None:
             input_ = jnp.concatenate([hidden_state, x], axis=time_dim)                # [rnn_dim+1,]
@@ -801,11 +802,11 @@ class EventuallyRecurrent(Temporal_Operator):
     def __init__(self, subformula, interval=None):
         super().__init__(subformula=subformula, interval=interval)
 
-    def _cell(self, x, hidden_state, time_dim, **kwargs):
+    def _cell(self, x, hidden_state, **kwargs):
         """
         see Temporal_Operator._cell
         """
-
+        time_dim = 0  # assuming signal is [time_dim,...]
         # Case 1, interval = [0, inf]
         if self.interval is None:
             input_ = jnp.concatenate([hidden_state, x], axis=time_dim)                # [rnn_dim+1, ]
@@ -850,7 +851,7 @@ class UntilRecurrent(STL_Formula):
             self.subformula2 = Eventually(subformula=subformula2, interval=[0,1])
         self.LARGE_NUMBER = 1E6
 
-    def robustness_trace(self, signal, time_dim=0, **kwargs):
+    def robustness_trace(self, signal, **kwargs):
         """
         Computing robustness trace of subformula1 U subformula2  (see paper)
 
@@ -865,7 +866,7 @@ class UntilRecurrent(STL_Formula):
 
 
         # TODO (karenl7) this really assumes axis=1 is the time dimension. Can this be generalized?
-        assert time_dim == 0, "Current implementation assumes time_dim=0"
+        time_dim = 0  # assuming signal is [time_dim,...]
         LARGE_NUMBER = self.LARGE_NUMBER
 
         if isinstance(signal, tuple):
@@ -919,12 +920,10 @@ class UntilRecurrent(STL_Formula):
 class Expression:
     name: str
     value: jnp.array
-    time_dim: int
 
-    def __init__(self, name, value, reverse, time_dim=1):
+    def __init__(self, name, value):
         self.value = value
         self.name = name
-        self.time_dim = time_dim
 
     def set_name(self, new_name):
         self.name = new_name
@@ -1010,12 +1009,10 @@ class Expression:
 class Predicate:
     name: str
     predicate_function: Callable
-    time_dim: int
 
-    def __init__(self, name, predicate_function=lambda x: x, time_dim=1, reverse=False):
+    def __init__(self, name, predicate_function=lambda x: x):
         self.name = name
         self.predicate_function = predicate_function
-        self.time_dim = time_dim
 
     def set_name(self, new_name):
         self.name = new_name
@@ -1111,8 +1108,10 @@ class Eventually(STL_Formula):
 
         self.interval = interval
         self.subformula = subformula
+        self._interval = [0, jnp.inf] if self.interval is None else self.interval
 
-    def robustness_trace(self, signal, time_dim=0, padding="last", large_number=1E9, **kwargs):
+    def robustness_trace(self, signal, padding="last", large_number=1E9, **kwargs):
+        time_dim = 0  # assuming signal is [time_dim,...]
         signal = self.subformula(signal, time_dim=time_dim, padding=padding, large_number=large_number, **kwargs)
         T = signal.shape[time_dim]
         mask_value = -large_number
@@ -1134,19 +1133,29 @@ class Eventually(STL_Formula):
         masked_signal_matrix = jnp.where(time_interval_mask * subsignal_mask, signal_padded, mask_value)
         return maxish(masked_signal_matrix, axis=time_dim, keepdims=False, **kwargs)
 
+    def _next_function(self):
+        """ next function is the input subformula. For visualization purposes """
+        return [self.subformula]
+
+    def __str__(self):
+        return "♢ " + str(self._interval) + "( " + str(self.subformula) + " )"
+
+
 class Always(STL_Formula):
     def __init__(self, subformula, interval=None):
         super().__init__()
 
         self.interval = interval
         self.subformula = subformula
+        self._interval = [0, jnp.inf] if self.interval is None else self.interval
 
-    def robustness_trace(self, signal, time_dim=0, padding="last", large_number=1E9, **kwargs):
-        signal = self.subformula(signal, time_dim=time_dim, padding=padding, large_number=large_number, **kwargs)
+    def robustness_trace(self, signal, padding="last", large_number=1E9, **kwargs):
+        time_dim = 0  # assuming signal is [time_dim,...]
+        signal = self.subformula(signal, padding=padding, large_number=large_number, **kwargs)
         T = signal.shape[time_dim]
         mask_value = large_number
         if self.interval is None:
-            interval = [0,T]
+            interval = [0,T-1]
         else:
             interval = self.interval
         signal_matrix = signal.reshape([T,1]) @ jnp.ones([1,T])
@@ -1163,28 +1172,39 @@ class Always(STL_Formula):
         masked_signal_matrix = jnp.where(time_interval_mask * subsignal_mask, signal_padded, mask_value)
         return minish(masked_signal_matrix, axis=time_dim, keepdims=False, **kwargs)
 
+    def _next_function(self):
+        """ next function is the input subformula. For visualization purposes """
+        return [self.subformula]
+
+    def __str__(self):
+        return "◻ " + str(self._interval) + "( " + str(self.subformula) + " )"
+
 
 class Until(STL_Formula):
-    def __init__(self, subformula1, subformula2, interval):
+    def __init__(self, subformula1, subformula2, interval=None):
         super().__init__()
         self.subformula1 = subformula1
         self.subformula2 = subformula2
         self.interval = interval
+        self._interval = [0, jnp.inf] if self.interval is None else self.interval
 
 
-    def robustness_trace(self, signal, time_dim=0, padding="last", large_number=1E9, **kwargs):
+    def robustness_trace(self, signal, padding="last", large_number=1E9, **kwargs):
+        time_dim = 0  # assuming signal is [time_dim,...]
         if isinstance(signal, tuple):
             signal1, signal2 = signal
-            signal1 = self.subformula1(signal1, time_dim=time_dim, padding=padding, large_number=large_number, **kwargs)
-            signal2 = self.subformula2(signal2, time_dim=time_dim, padding=padding, large_number=large_number, **kwargs)
+            assert signal1.shape[time_dim] == signal2.shape[time_dim]
+            signal1 = self.subformula1(signal1, padding=padding, large_number=large_number, **kwargs)
+            signal2 = self.subformula2(signal2, padding=padding, large_number=large_number, **kwargs)
+            T = signal1.shape[time_dim]
         else:
-            signal1 = self.subformula1(signal, time_dim=time_dim, padding=padding, large_number=large_number, **kwargs)
-            signal2 = self.subformula2(signal, time_dim=time_dim, padding=padding, large_number=large_number, **kwargs)
+            signal1 = self.subformula1(signal, padding=padding, large_number=large_number, **kwargs)
+            signal2 = self.subformula2(signal, padding=padding, large_number=large_number, **kwargs)
+            T = signal.shape[time_dim]
 
-        T = signal.shape[time_dim]
         mask_value = large_number
         if self.interval is None:
-            interval = [0,T]
+            interval = [0,T-1]
         else:
             interval = self.interval
         signal1_matrix = signal1.reshape([T,1]) @ jnp.ones([1,T])
@@ -1208,3 +1228,10 @@ class Until(STL_Formula):
         phi1_masked_signal = jnp.stack([jnp.where(m1, signal1_padded, mask_value) for m1 in phi1_mask], 0)
         phi2_masked_signal = jnp.stack([jnp.where(m2, signal2_padded, mask_value) for m2 in phi2_mask], 0)
         return maxish(jnp.stack([minish(jnp.stack([minish(s1, axis=0, keepdims=False), minish(s2, axis=0, keepdims=False)], axis=0), axis=0, keepdims=False) for (s1, s2) in zip(phi1_masked_signal, phi2_masked_signal)], axis=0), axis=0, keepdims=False)
+
+    def _next_function(self):
+        """ next function is the input subformula. For visualization purposes """
+        return [self.subformula1, self.subformula2]
+
+    def __str__(self):
+        return  "(" + str(self.subformula1) + ")" + " U " + str(self._interval) + "(" + str(self.subformula2) + ")"
