@@ -1223,7 +1223,7 @@ class Until(STL_Formula):
         signal2_padded = jnp.concatenate([signal2_matrix, signal2_pad], axis=time_dim)
 
         start_idx = interval[0]
-        phi1_mask = jnp.stack([jnp.triu(jnp.ones([T + interval[1]+1,T]), -end_idx) * jnp.tril(jnp.ones([T + interval[1]+1,T]), -start_idx) for end_idx in range(interval[0], interval[-1]+1)], 0)
+        phi1_mask = jnp.stack([jnp.triu(jnp.ones([T + interval[1]+1,T]), -end_idx) * jnp.tril(jnp.ones([T + interval[1]+1,T])) for end_idx in range(interval[0], interval[-1]+1)], 0)
         phi2_mask = jnp.stack([jnp.triu(jnp.ones([T + interval[1]+1,T]), -end_idx) * jnp.tril(jnp.ones([T + interval[1]+1,T]), -end_idx) for end_idx in range(interval[0], interval[-1]+1)], 0)
         phi1_masked_signal = jnp.stack([jnp.where(m1, signal1_padded, mask_value) for m1 in phi1_mask], 0)
         phi2_masked_signal = jnp.stack([jnp.where(m2, signal2_padded, mask_value) for m2 in phi2_mask], 0)
