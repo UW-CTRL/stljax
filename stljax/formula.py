@@ -119,7 +119,7 @@ def gmsr_min_fast(signal, eps, p):
 def gmsr_max_fast(signal, eps, p):
     return -gmsr_min_fast(-signal, eps, p)
 
-@functools.partial(jax.jit, static_argnames=("axis", "keepdims", "approx_method"))
+@functools.partial(jax.jit, static_argnames=("axis", "keepdims", "approx_method", "padding"))
 def maxish(signal, axis, keepdims=True, approx_method="true", temperature=None, **kwargs):
     """
     Function to compute max(ish) along an axis.
@@ -178,7 +178,7 @@ def maxish(signal, axis, keepdims=True, approx_method="true", temperature=None, 
         case _:
             raise ValueError("Invalid approx_method")
 
-@functools.partial(jax.jit, static_argnames=("axis", "keepdims", "approx_method"))
+@functools.partial(jax.jit, static_argnames=("axis", "keepdims", "approx_method", "padding"))
 def minish(signal, axis, keepdims=True, approx_method="true", temperature=None, **kwargs):
     '''
     Same as maxish
@@ -208,7 +208,7 @@ class STL_Formula:
 
         raise NotImplementedError("robustness_trace not yet implemented")
 
-    def robustness(self, signal, time_dim, **kwargs):
+    def robustness(self, signal, **kwargs):
         """
         Computes the robustness value. Extracts the last entry along time_dim of robustness trace.
 
@@ -218,9 +218,8 @@ class STL_Formula:
 
         Return: jnp.array, same as input with the time_dim removed.
         """
-
-        kwargs["time_dim"] = time_dim
-        return jnp.rollaxis(self.__call__(signal, **kwargs), time_dim)[-1]
+        return self.__call__(signal, **kwargs)[0]
+        # return jnp.rollaxis(self.__call__(signal, **kwargs), time_dim)[-1]
 
     def eval_trace(self, signal, **kwargs):
         """
@@ -236,7 +235,7 @@ class STL_Formula:
 
         return self.__call__(signal, **kwargs) > 0
 
-    def eval(self, signal, time_dim, **kwargs):
+    def eval(self, signal, **kwargs):
         """
         Boolean of robustness
 
@@ -246,7 +245,7 @@ class STL_Formula:
 
         Return: jnp.array with True/False, same as input with the time_dim removed.
         """
-        return self.robustness(signal, time_dim, **kwargs) > 0
+        return self.robustness(signal, **kwargs) > 0
 
 
     def __call__(self, signal, **kwargs):
@@ -325,11 +324,7 @@ class LessThan(STL_Formula):
             c_val = self.val
 
         if isinstance(self.lhs, Predicate):
-            if not self.lhs.reverse:
-                warnings.warn("Input Predicate \"{input_name}\" is not time reversed. Reversing the signal now...".format(input_name=self.lhs.name))
-                return (c_val - jnp.flip(self.lhs(signal), self.lhs.time_dim)) * predicate_scale
-            else:
-                return (c_val - self.lhs(signal)) * predicate_scale
+            return (c_val - self.lhs(signal)) * predicate_scale
         else:
             return (c_val - signal) * predicate_scale
 
@@ -384,11 +379,7 @@ class GreaterThan(STL_Formula):
             c_val = self.val
 
         if isinstance(self.lhs, Predicate):
-            if not self.lhs.reverse:
-                warnings.warn("Input Predicate \"{input_name}\" is not time reversed. Reversing the signal now...".format(input_name=self.lhs.name))
-                return -(c_val - jnp.flip(self.lhs(trace), self.lhs.time_dim)) * predicate_scale
-            else:
-                return -(c_val - self.lhs(trace)) * predicate_scale
+            return -(c_val - self.lhs(trace)) * predicate_scale
         else:
             return -(c_val - trace) * predicate_scale
 
@@ -443,11 +434,7 @@ class Equal(STL_Formula):
             c_val = self.val
 
         if isinstance(self.lhs, Predicate):
-            if not self.lhs.reverse:
-                warnings.warn("Input Predicate \"{input_name}\" is not time reversed. Reversing the signal now...".format(input_name=self.lhs.name))
-                return -jnp.abs(c_val - jnp.flip(self.lhs(trace), self.lhs.time_dim)) * predicate_scale
-            else:
-                return -jnp.abs(c_val - self.lhs(trace)) * predicate_scale
+            return -jnp.abs(c_val - self.lhs(trace)) * predicate_scale
         else:
             return -jnp.abs(c_val - trace) * predicate_scale
 
@@ -670,7 +657,7 @@ class Temporal_Operator(STL_Formula):
         self.operation = None
         # Matrices that shift a vector and add a new entry at the end.
         self.M = jnp.diag(jnp.ones(self.hidden_dim-1), k=1)
-        self.b = jnp.expand_dims(jnp.zeros(self.hidden_dim), -1)
+        self.b = jnp.zeros(self.hidden_dim)
         self.b = self.b.at[-1].set(1)
 
 
@@ -679,10 +666,10 @@ class Temporal_Operator(STL_Formula):
         Compute the initial hidden state.
 
         Args:
-            signal: the input signal. Expected size [batch_size, time_dim, signal_dim]
+            signal: the input signal. Expected size [time_dim,]
 
         Returns:
-            h0: initial hidden state is [batch_size, hidden_dim, signal_dim]
+            h0: initial hidden state is [hidden_dim,]
 
         Notes:
         Initializing the hidden state requires padding on the signal. Currently, the default is to extend the last value.
@@ -692,15 +679,16 @@ class Temporal_Operator(STL_Formula):
         # Case 1, 2, 4
         # TODO: make this less hard-coded. Assumes signal is [bs, time_dim, signal_dim], and already reversed
         # pads with the signal value at the last time step.
-        h0 = jnp.ones([signal.shape[0], self.hidden_dim, signal.shape[2]])*signal[:,:1,:]
+        y = jax.lax.stop_gradient(signal[:1])
+        h0 = jnp.ones([self.hidden_dim, *signal.shape[1:]])*y
 
         # Case 3: if self.interval is [a, jnp.inf), then the hidden state is a tuple (like in an LSTM)
         if (self._interval[1] == jnp.inf) & (self._interval[0] > 0):
-            c0 = signal[:,:1,:]
+            c0 = signal[:1]
             return (c0, h0)
         return h0
 
-    def _cell(self, x, hidden_state, time_dim=1, **kwargs):
+    def _cell(self, x, hidden_state, **kwargs):
         """
         This function describes the operation that takes place at each recurrent step.
         Args:
@@ -713,32 +701,32 @@ class Temporal_Operator(STL_Formula):
         raise NotImplementedError("_cell is not implemented")
 
 
-    def _run_cell(self, signal, time_dim=1, **kwargs):
+    def _run_cell(self, signal, **kwargs):
         """
         Function to run a signal through a cell T times, where T is the length of the signal in the time dimension
 
         Args:
-            signal: input signal, size = [bs, time_dim, ...]
-            time_dim: axis corresponding to time_dim. Default: 1
+            signal: input signal, size = [time_dim,]
+            time_dim: axis corresponding to time_dim. Default: 0
             kwargs: Other arguments including time_dim, approx_method, temperature
 
         Return:
             outputs: list of outputs
             states: list of hidden_states
         """
-
+        time_dim = 0  # assuming signal is [time_dim,...]
         outputs = []
         states = []
-        hidden_state = self._initialize_hidden_state(signal)                               # [batch_size, hidden_dim, x_dim]
+        hidden_state = self._initialize_hidden_state(signal)                               # [hidden_dim]
         signal_split = jnp.split(signal, signal.shape[time_dim], time_dim)    # list of x at each time step
         for i in range(signal.shape[time_dim]):
-            o, hidden_state = self._cell(signal_split[i], hidden_state, time_dim, **kwargs)
+            o, hidden_state = self._cell(signal_split[i], hidden_state, **kwargs)
             outputs.append(o)
             states.append(hidden_state)
         return outputs, states
 
 
-    def robustness_trace(self, signal, time_dim=1, **kwargs):
+    def robustness_trace(self, signal, **kwargs):
         """
         Function to compute robustness trace of a temporal STL formula
         First, compute the robustness trace of the subformula, and use that as the input for the recurrent computation
@@ -751,16 +739,16 @@ class Temporal_Operator(STL_Formula):
         Returns:
             robustness_trace: jnp.array. Same size as signal.
         """
-
+        time_dim = 0  # assuming signal is [time_dim,...]
         trace = self.subformula(signal, **kwargs)
-        outputs, _ = self._run_cell(trace, time_dim, **kwargs)
-        return jnp.concatenate(outputs, axis=time_dim)                              # [batch_size, time_dim, ...]
+        outputs, _ = self._run_cell(trace, **kwargs)
+        return jnp.concatenate(outputs, axis=time_dim)                              # [time_dim, ]
 
     def _next_function(self):
         """ next function is the input subformula. For visualization purposes """
         return [self.subformula]
 
-class Always(Temporal_Operator):
+class AlwaysRecurrent(Temporal_Operator):
     """
     The Always STL formula □_[a,b] subformula
     The robustness value is the minimum value of the input trace over a prespecified time interval
@@ -772,36 +760,37 @@ class Always(Temporal_Operator):
     def __init__(self, subformula, interval=None):
         super().__init__(subformula=subformula, interval=interval)
 
-    def _cell(self, x, hidden_state, time_dim, **kwargs):
+    def _cell(self, x, hidden_state, **kwargs):
         """
         see Temporal_Operator._cell
         """
+        time_dim = 0  # assuming signal is [time_dim,...]
         # Case 1, interval = [0, inf]
         if self.interval is None:
-            input_ = jnp.concatenate([hidden_state, x], axis=time_dim)                # [batch_size, rnn_dim+1, x_dim]
-            output = minish(input_, time_dim, keepdims=True, **kwargs)       # [batch_size, 1, x_dim]
+            input_ = jnp.concatenate([hidden_state, x], axis=time_dim)                # [rnn_dim+1,]
+            output = minish(input_, time_dim, keepdims=True, **kwargs)       # [1,]
             return output, output
 
         # Case 3: self.interval is [a, np.inf)
         if (self._interval[1] == jnp.inf) & (self._interval[0] > 0):
             c, h = hidden_state
-            ch = jnp.concatenate([c, h[:,:1,:]], axis=time_dim)                             # [batch_size, 2, x_dim]
-            output = minish(ch, time_dim, keepdims=True, **kwargs)               # [batch_size, 1, x_dim]
+            ch = jnp.concatenate([c, h[:1]], axis=time_dim)                             # [2,]
+            output = minish(ch, time_dim, keepdims=True, **kwargs)               # [1,]
             hidden_state_ = (output, self.M @ h + self.b * x)
 
         # Case 2 and 4: self.interval is [a, b]
         else:
             hidden_state_ = self.M @ hidden_state + self.b * x
-            hx = jnp.concatenate([hidden_state, x], axis=time_dim)                             # [batch_size, rnn_dim+1, x_dim]
-            input_ = hx[:,:self.steps,:]                               # [batch_size, self.steps, x_dim]
-            output = minish(input_, time_dim, **kwargs)               # [batch_size, 1, x_dim]
+            hx = jnp.concatenate([hidden_state, x], axis=time_dim)                             # [rnn_dim+1,]
+            input_ = hx[:self.steps]                               # [self.steps,]
+            output = minish(input_, time_dim, **kwargs)               # [1,]
         return output, hidden_state_
 
     def __str__(self):
         return "◻ " + str(self._interval) + "( " + str(self.subformula) + " )"
 
 
-class Eventually(Temporal_Operator):
+class EventuallyRecurrent(Temporal_Operator):
     """
     The Eventually STL formula ♢_[a,b] subformula
     The robustness value is the minimum value of the input trace over a prespecified time interval
@@ -813,37 +802,37 @@ class Eventually(Temporal_Operator):
     def __init__(self, subformula, interval=None):
         super().__init__(subformula=subformula, interval=interval)
 
-    def _cell(self, x, hidden_state, time_dim, **kwargs):
+    def _cell(self, x, hidden_state, **kwargs):
         """
         see Temporal_Operator._cell
         """
-
+        time_dim = 0  # assuming signal is [time_dim,...]
         # Case 1, interval = [0, inf]
         if self.interval is None:
-            input_ = jnp.concatenate([hidden_state, x], axis=time_dim)                # [batch_size, rnn_dim+1, x_dim]
-            output = maxish(input_, time_dim, keepdims=True, **kwargs)       # [batch_size, 1, x_dim]
+            input_ = jnp.concatenate([hidden_state, x], axis=time_dim)                # [rnn_dim+1, ]
+            output = maxish(input_, time_dim, keepdims=True, **kwargs)       # [1, ]
             return output, output
 
         # Case 3: self.interval is [a, np.inf)
         if (self._interval[1] == jnp.inf) & (self._interval[0] > 0):
             c, h = hidden_state
-            ch = jnp.concatenate([c, h[:,:1,:]], axis=time_dim)                             # [batch_size, 2, x_dim]
-            output = maxish(ch, time_dim, keepdims=True, **kwargs)               # [batch_size, 1, x_dim]
+            ch = jnp.concatenate([c, h[:1]], axis=time_dim)                             # [2, ]
+            output = maxish(ch, time_dim, keepdims=True, **kwargs)               # [1, ]
             hidden_state_ = (output, self.M @ h + self.b * x)
 
         # Case 2 and 4: self.interval is [a, b]
         else:
             hidden_state_ = self.M @ hidden_state + self.b * x
-            hx = jnp.concatenate([hidden_state, x], axis=time_dim)                             # [batch_size, rnn_dim+1, x_dim]
-            input_ = hx[:,:self.steps,:]                               # [batch_size, self.steps, x_dim]
-            output = maxish(input_, time_dim, **kwargs)               # [batch_size, 1, x_dim]
+            hx = jnp.concatenate([hidden_state, x], axis=time_dim)                             # [rnn_dim+1, ]
+            input_ = hx[:self.steps]                               # [self.steps, ]
+            output = maxish(input_, time_dim, **kwargs)               # [1, ]
         return output, hidden_state_
 
     def __str__(self):
         return "♢ " + str(self._interval) + "( " + str(self.subformula) + " )"
 
 
-class Until(STL_Formula):
+class UntilRecurrent(STL_Formula):
     """
     The Until STL operator U. Subformula1 U_[a,b] subformula2
     Arg:
@@ -862,7 +851,7 @@ class Until(STL_Formula):
             self.subformula2 = Eventually(subformula=subformula2, interval=[0,1])
         self.LARGE_NUMBER = 1E6
 
-    def robustness_trace(self, signal, time_dim=1, **kwargs):
+    def robustness_trace(self, signal, **kwargs):
         """
         Computing robustness trace of subformula1 U subformula2  (see paper)
 
@@ -877,7 +866,7 @@ class Until(STL_Formula):
 
 
         # TODO (karenl7) this really assumes axis=1 is the time dimension. Can this be generalized?
-        assert time_dim == 1, "Current implementation assumes time_dim=1"
+        time_dim = 0  # assuming signal is [time_dim,...]
         LARGE_NUMBER = self.LARGE_NUMBER
 
         if isinstance(signal, tuple):
@@ -893,15 +882,13 @@ class Until(STL_Formula):
             n_time_steps = signal.shape[time_dim] # TODO: WIP
 
         Alw = Always(subformula=Identity(name=str(self.subformula1)))
-        # TODO (karenl7) this really assumes axis=1 is the time dimension. Can this be generalized?
-        LHS = jnp.permute_dims(jnp.repeat(jnp.expand_dims(trace2, -1), n_time_steps, axis=-1), [0,3,2,1])  # [bs, sub_signal, state, t_prime]
-        RHS = jnp.ones_like(LHS) * -LARGE_NUMBER  # [bs, sub_signal, state, t_prime]
+        LHS = jnp.permute_dims(jnp.repeat(jnp.expand_dims(trace2, -1), n_time_steps, axis=-1), [1,0])  # [sub_signal, t_prime]
+        RHS = jnp.ones_like(LHS) * -LARGE_NUMBER  # [sub_signal, t_prime]
 
         # Case 1, interval = [0, inf]
         if self.interval == None:
             for i in range(n_time_steps):
-                # TODO (karenl7) this really assumes axis=1 is the time dimension. Can this be generalized?
-                RHS = RHS.at[:,i:,:,i].set(Alw(trace1[:,i:,:]))
+                RHS = RHS.at[i:,i].set(Alw(trace1[i:]))
 
         # Case 2 and 4: self.interval is [a, b], a ≥ 0, b < ∞
         elif self.interval[1] < jnp.inf:
@@ -909,17 +896,14 @@ class Until(STL_Formula):
             b = self.interval[1]
             for i in range(n_time_steps):
                 end = i+b+1
-                # TODO (karenl7) this really assumes axis=1 is the time dimension. Can this be generalized?
-                RHS = RHS.at[:,i+a:end,:,i].set(Alw(trace1[:,i:end,:])[:,a:,:])
+                RHS = RHS.at[i+a:end,i].set(Alw(trace1[i:end])[a:])
 
         # Case 3: self.interval is [a, np.inf), a ≂̸ 0
         else:
             a = self.interval[0]
             for i in range(n_time_steps):
-                # TODO (karenl7) this really assumes axis=1 is the time dimension. Can this be generalized?
-                RHS = RHS.at[:,i+a:,:,i].set(Alw(trace1[:,i:,:])[:,a:,:])
+                RHS = RHS.at[i+a:,i].set(Alw(trace1[i:])[a:])
 
-        # TODO (karenl7) this really assumes axis=1 is the time dimension. Can this be generalized?
         return maxish(minish(jnp.stack([LHS, RHS], axis=-1), axis=-1, keepdims=False, **kwargs), axis=-1, keepdims=False, **kwargs)
 
 
@@ -936,14 +920,10 @@ class Until(STL_Formula):
 class Expression:
     name: str
     value: jnp.array
-    reverse: bool
-    time_dim: int
 
-    def __init__(self, name, value, reverse, time_dim=1):
+    def __init__(self, name, value):
         self.value = value
         self.name = name
-        self.reverse = reverse
-        self.time_dim = time_dim
 
     def set_name(self, new_name):
         self.name = new_name
@@ -951,41 +931,23 @@ class Expression:
     def set_value(self, new_value):
         self.value = new_value
 
-    def flip(self, dim):
-        assert self.value is not None, "Expression does not have numerical values"
-        self.value = jnp.flip(self.value, dim)
-        self.reverse = not self.reverse
-        return self.value
-
-    def flip_time(self):
-        assert self.value is not None, "Expression does not have numerical values"
-        self.value = jnp.flip(self.value, self.time_dim)
-        self.reverse = not self.reverse
-        return self.value
-
     def __neg__(self):
-        return Expression('-' + self.name, -self.value, self.reverse)
+        return Expression('-' + self.name, -self.value)
 
     def __add__(self, other):
         if isinstance(other, Expression):
-            if self.reverse == other.reverse:
-                return Expression(self.name + ' + ' + other.name, self.value + other.value, self.reverse)
-            else:
-                raise ValueError("reverse attribute do not match")
+            return Expression(self.name + ' + ' + other.name, self.value + other.value)
         else:
-            return Expression(self.name + ' + other', self.value + other, self.reverse)
+            return Expression(self.name + ' + other', self.value + other)
 
     def __radd__(self, other):
         return self.__add__(other)
 
     def __sub__(self, other):
         if isinstance(other, Expression):
-            if self.reverse == other.reverse:
-                return Expression(self.name + ' - ' + other.name, self.value - other.value, self.reverse)
-            else:
-                raise ValueError("reverse attribute do not match")
+            return Expression(self.name + ' - ' + other.name, self.value - other.value)
         else:
-            return Expression(self.name + " - other", self.value - other, self.reverse)
+            return Expression(self.name + " - other", self.value - other)
 
     def __rsub__(self, other):
         return self.__sub__(other)
@@ -994,12 +956,9 @@ class Expression:
 
     def __mul__(self, other):
         if isinstance(other, Expression):
-            if self.reverse == other.reverse:
-                return Expression(self.name + ' × ' + other.name, self.value * other.value, self.reverse)
-            else:
-                raise ValueError("reverse attribute do not match")
+            return Expression(self.name + ' × ' + other.name, self.value * other.value)
         else:
-            return Expression(self.name + " * other", self.value * other, self.reverse)
+            return Expression(self.name + " * other", self.value * other)
 
 
     def __rmul__(self, other):
@@ -1009,10 +968,7 @@ class Expression:
         # This is the new form required by Python 3
         numerator = a
         denominator = b
-        if numerator.reverse == denominator.reverse:
-            return Expression(numerator.name + '/' + denominator.name, numerator.value/denominator.value, denominator.reverse)
-        else:
-            raise ValueError("reverse attribute do not match")
+        return Expression(numerator.name + '/' + denominator.name, numerator.value/denominator.value)
 
 
     # Comparators
@@ -1053,27 +1009,20 @@ class Expression:
 class Predicate:
     name: str
     predicate_function: Callable
-    reverse: bool
-    time_dim: int
 
-    def __init__(self, name, predicate_function=lambda x: x, time_dim=1, reverse=False):
+    def __init__(self, name, predicate_function=lambda x: x):
         self.name = name
         self.predicate_function = predicate_function
-        self.reverse = reverse
-        self.time_dim = time_dim
 
     def set_name(self, new_name):
         self.name = new_name
 
     def __neg__(self):
-        return Predicate('- ' + self.name, lambda x: -self.predicate_function(x), self.reverse)
+        return Predicate('- ' + self.name, lambda x: -self.predicate_function(x))
 
     def __add__(self, other):
         if isinstance(other, Predicate):
-            if self.reverse == other.reverse:
-                return Predicate(self.name + ' + ' + other.name, lambda x: self.predicate_function(x) + other.predicate_function(x), self.reverse)
-            else:
-                raise ValueError("reverse attribute do not match")
+            return Predicate(self.name + ' + ' + other.name, lambda x: self.predicate_function(x) + other.predicate_function(x))
         else:
             raise ValueError("Type error. Must be Predicate")
 
@@ -1082,10 +1031,7 @@ class Predicate:
 
     def __sub__(self, other):
         if isinstance(other, Predicate):
-            if self.reverse == other.reverse:
-                return Predicate(self.name + ' - ' + other.name, lambda x: self.predicate_function(x) - other.predicate_function(x), self.reverse)
-            else:
-                raise ValueError("reverse attribute do not match")
+            return Predicate(self.name + ' - ' + other.name, lambda x: self.predicate_function(x) - other.predicate_function(x))
         else:
             raise ValueError("Type error. Must be Predicate")
 
@@ -1096,10 +1042,7 @@ class Predicate:
 
     def __mul__(self, other):
         if isinstance(other, Predicate):
-            if self.reverse == other.reverse:
-                return Predicate(self.name + ' x ' + other.name, lambda x: self.predicate_function(x) * other.predicate_function(x), self.reverse)
-            else:
-                raise ValueError("reverse attribute do not match")
+            return Predicate(self.name + ' x ' + other.name, lambda x: self.predicate_function(x) * other.predicate_function(x))
         else:
             raise ValueError("Type error. Must be Predicate")
 
@@ -1108,10 +1051,7 @@ class Predicate:
 
     def __truediv__(a, b):
         if isinstance(a, Predicate) and isinstance(b, Predicate):
-            if a.reverse == b.reverse:
-                return Predicate(a.name + ' / ' + b.name, lambda x: a.predicate_function(x) / b.predicate_function(x), a.reverse)
-            else:
-                raise ValueError("reverse attribute do not match")
+            return Predicate(a.name + ' / ' + b.name, lambda x: a.predicate_function(x) / b.predicate_function(x))
         else:
             raise ValueError("Type error. Must be Predicate")
 
@@ -1153,15 +1093,145 @@ def convert_to_input_values(inputs):
         if isinstance(inputs, Expression):
             assert inputs.value is not None, "Input Expression does not have numerical values"
             # if Expression is not time reversed
-            if not inputs.reverse:
-                # throw warning to the user
-                warnings.warn("Input Expression \"{input_name}\" is not time reversed! stljax will time-reverse the inputs for you...".format(input_name=inputs.name))
-                return jnp.flip(inputs.value, inputs.time_dim)
-            else:
-                return inputs.value
+            return inputs.value
         elif isinstance(inputs, jax.Array):
             return inputs
         else:
             raise ValueError("Not a invalid input trace")
     else:
         return (convert_to_input_values(inputs[0]), convert_to_input_values(inputs[1]))
+
+
+class Eventually(STL_Formula):
+    def __init__(self, subformula, interval=None):
+        super().__init__()
+
+        self.interval = interval
+        self.subformula = subformula
+        self._interval = [0, jnp.inf] if self.interval is None else self.interval
+
+    def robustness_trace(self, signal, padding="last", large_number=1E9, **kwargs):
+        time_dim = 0  # assuming signal is [time_dim,...]
+        signal = self.subformula(signal, time_dim=time_dim, padding=padding, large_number=large_number, **kwargs)
+        T = signal.shape[time_dim]
+        mask_value = -large_number
+        if self.interval is None:
+            interval = [0,T]
+        else:
+            interval = self.interval
+        signal_matrix = signal.reshape([T,1]) @ jnp.ones([1,T])
+        if padding == "last":
+            pad_value = signal[-1]
+        elif padding == "mean":
+            pad_value = signal.mean(time_dim)
+        else:
+            pad_value = padding
+        signal_pad = jnp.ones([interval[1]+1, T]) * pad_value
+        signal_padded = jnp.concatenate([signal_matrix, signal_pad], axis=time_dim)
+        subsignal_mask = jnp.tril(jnp.ones([T + interval[1]+1,T]))
+        time_interval_mask = jnp.triu(jnp.ones([T + interval[1]+1,T]), -interval[-1]) * jnp.tril(jnp.ones([T + interval[1]+1,T]), -interval[0])
+        masked_signal_matrix = jnp.where(time_interval_mask * subsignal_mask, signal_padded, mask_value)
+        return maxish(masked_signal_matrix, axis=time_dim, keepdims=False, **kwargs)
+
+    def _next_function(self):
+        """ next function is the input subformula. For visualization purposes """
+        return [self.subformula]
+
+    def __str__(self):
+        return "♢ " + str(self._interval) + "( " + str(self.subformula) + " )"
+
+
+class Always(STL_Formula):
+    def __init__(self, subformula, interval=None):
+        super().__init__()
+
+        self.interval = interval
+        self.subformula = subformula
+        self._interval = [0, jnp.inf] if self.interval is None else self.interval
+
+    def robustness_trace(self, signal, padding="last", large_number=1E9, **kwargs):
+        time_dim = 0  # assuming signal is [time_dim,...]
+        signal = self.subformula(signal, padding=padding, large_number=large_number, **kwargs)
+        T = signal.shape[time_dim]
+        mask_value = large_number
+        if self.interval is None:
+            interval = [0,T-1]
+        else:
+            interval = self.interval
+        signal_matrix = signal.reshape([T,1]) @ jnp.ones([1,T])
+        if padding == "last":
+            pad_value = signal[-1]
+        elif padding == "mean":
+            pad_value = signal.mean(time_dim)
+        else:
+            pad_value = padding
+        signal_pad = jnp.ones([interval[1]+1, T]) * pad_value
+        signal_padded = jnp.concatenate([signal_matrix, signal_pad], axis=time_dim)
+        subsignal_mask = jnp.tril(jnp.ones([T + interval[1]+1,T]))
+        time_interval_mask = jnp.triu(jnp.ones([T + interval[1]+1,T]), -interval[-1]) * jnp.tril(jnp.ones([T + interval[1]+1,T]), -interval[0])
+        masked_signal_matrix = jnp.where(time_interval_mask * subsignal_mask, signal_padded, mask_value)
+        return minish(masked_signal_matrix, axis=time_dim, keepdims=False, **kwargs)
+
+    def _next_function(self):
+        """ next function is the input subformula. For visualization purposes """
+        return [self.subformula]
+
+    def __str__(self):
+        return "◻ " + str(self._interval) + "( " + str(self.subformula) + " )"
+
+
+class Until(STL_Formula):
+    def __init__(self, subformula1, subformula2, interval=None):
+        super().__init__()
+        self.subformula1 = subformula1
+        self.subformula2 = subformula2
+        self.interval = interval
+        self._interval = [0, jnp.inf] if self.interval is None else self.interval
+
+
+    def robustness_trace(self, signal, padding="last", large_number=1E9, **kwargs):
+        time_dim = 0  # assuming signal is [time_dim,...]
+        if isinstance(signal, tuple):
+            signal1, signal2 = signal
+            assert signal1.shape[time_dim] == signal2.shape[time_dim]
+            signal1 = self.subformula1(signal1, padding=padding, large_number=large_number, **kwargs)
+            signal2 = self.subformula2(signal2, padding=padding, large_number=large_number, **kwargs)
+            T = signal1.shape[time_dim]
+        else:
+            signal1 = self.subformula1(signal, padding=padding, large_number=large_number, **kwargs)
+            signal2 = self.subformula2(signal, padding=padding, large_number=large_number, **kwargs)
+            T = signal.shape[time_dim]
+
+        mask_value = large_number
+        if self.interval is None:
+            interval = [0,T-1]
+        else:
+            interval = self.interval
+        signal1_matrix = signal1.reshape([T,1]) @ jnp.ones([1,T])
+        signal2_matrix = signal2.reshape([T,1]) @ jnp.ones([1,T])
+        if padding == "last":
+            signal1_pad = jnp.ones([interval[1]+1, T]) * signal1[-1]
+            signal2_pad = jnp.ones([interval[1]+1, T]) * signal2[-1]
+        elif padding == "mean":
+            signal1_pad = jnp.ones([interval[1]+1, T]) * signal1.mean(time_dim)
+            signal2_pad = jnp.ones([interval[1]+1, T]) * signal2.mean(time_dim)
+        else:
+            signal1_pad = jnp.ones([interval[1]+1, T]) * padding
+            signal2_pad = jnp.ones([interval[1]+1, T]) * padding
+
+        signal1_padded = jnp.concatenate([signal1_matrix, signal1_pad], axis=time_dim)
+        signal2_padded = jnp.concatenate([signal2_matrix, signal2_pad], axis=time_dim)
+
+        start_idx = interval[0]
+        phi1_mask = jnp.stack([jnp.triu(jnp.ones([T + interval[1]+1,T]), -end_idx) * jnp.tril(jnp.ones([T + interval[1]+1,T])) for end_idx in range(interval[0], interval[-1]+1)], 0)
+        phi2_mask = jnp.stack([jnp.triu(jnp.ones([T + interval[1]+1,T]), -end_idx) * jnp.tril(jnp.ones([T + interval[1]+1,T]), -end_idx) for end_idx in range(interval[0], interval[-1]+1)], 0)
+        phi1_masked_signal = jnp.stack([jnp.where(m1, signal1_padded, mask_value) for m1 in phi1_mask], 0)
+        phi2_masked_signal = jnp.stack([jnp.where(m2, signal2_padded, mask_value) for m2 in phi2_mask], 0)
+        return maxish(jnp.stack([minish(jnp.stack([minish(s1, axis=0, keepdims=False), minish(s2, axis=0, keepdims=False)], axis=0), axis=0, keepdims=False) for (s1, s2) in zip(phi1_masked_signal, phi2_masked_signal)], axis=0), axis=0, keepdims=False)
+
+    def _next_function(self):
+        """ next function is the input subformula. For visualization purposes """
+        return [self.subformula1, self.subformula2]
+
+    def __str__(self):
+        return  "(" + str(self.subformula1) + ")" + " U " + str(self._interval) + "(" + str(self.subformula2) + ")"
