@@ -48,6 +48,7 @@ class STL_Formula(torch.nn.Module):
         Default: time=0 assuming this is the index for the NON-REVERSED trace. But the code will take it from the end since the input signal is TIME REVERSED.
 
         '''
+        return self.robustness_trace(signal, **kwargs)[0]
         #return self.forward(inputs, pscale=pscale, scale=scale, keepdim=keepdim, agm=agm, distributed=distributed, **kwargs)[:,-(time+1),:].unsqueeze(1)
 
     
@@ -213,7 +214,7 @@ class Always(STL_Formula):
         mask_value = large_number
         
         if self.interval is None:
-            interval = [0, T]
+            interval = [0, T-1]
         else:
             interval = self.interval
 
@@ -234,7 +235,7 @@ class Always(STL_Formula):
 
         masked_signal_matrix = torch.where((time_interval_mask * subsignal_mask).bool(), signal_padded, torch.tensor(mask_value, dtype=signal_padded.dtype, device=device))
 
-        return self.operation(masked_signal_matrix, scale=large_number, dim=time_dim, keepdim=False, **kwargs)
+        return self.operation(masked_signal_matrix, dim=time_dim, keepdim=False, **kwargs)
 
     def forward(self, signal: torch.Tensor, **kwargs) -> torch.Tensor:
         return self.robustness_trace(signal, **kwargs)
@@ -262,7 +263,7 @@ class Eventually(STL_Formula):
         
    
         if self.interval is None:
-            interval = [0, T]
+            interval = [0, T-1]
         else:
             interval = self.interval
 
@@ -283,7 +284,7 @@ class Eventually(STL_Formula):
 
         masked_signal_matrix = torch.where((time_interval_mask * subsignal_mask).bool(), signal_padded, torch.tensor(mask_value, dtype=signal_padded.dtype, device=device))
 
-        return self.operation(masked_signal_matrix, scale=large_number, dim=time_dim, keepdim=False, **kwargs)
+        return self.operation(masked_signal_matrix, dim=time_dim, keepdim=False, **kwargs)
 
     def forward(self, signal: torch.Tensor, **kwargs) -> torch.Tensor:
         return self.robustness_trace(signal, **kwargs)
@@ -317,6 +318,229 @@ class trial(STL_Formula):
     def forward(self, signal:torch.Tensor, **kwargs)->torch.Tensor:
         return self.robustness_trace(signal, **kwargs)
 
+class Temporal_Operator(STL_Formula):
+    """
+    Class to compute Eventually and Always. This builds a recurrent cell to perform dynamic programming
+
+    Args:
+        subformula: The subformula that the temporal operator is applied to.
+        interval: The time interval that the temporal operator operates on. Default: None which means [0, torch.inf]. Other options car be: [a, b] (b < torch.inf), [a, torch.inf] (a > 0)
+
+    NOTE: Assume that the interval is describing the INDICES of the desired time interval. The user is responsible for converting the time interval (in time units) into indices (integers) using knowledge of the time step size.
+    """
+    def __init__(self, subformula, interval=None, device="cpu"):
+        super().__init__()
+        self.subformula = subformula
+        self.interval = interval
+        self.device = device
+        self._interval = [0, torch.inf] if self.interval is None else self.interval
+        self.hidden_dim = 1 if not self.interval else self.interval[-1]    # hidden_dim=1 if interval is [0, ∞) otherwise hidden_dim=end of interval
+        if self.hidden_dim == torch.inf:
+            self.hidden_dim = self.interval[0]
+        self.steps = 1 if not self.interval else self.interval[-1] - self.interval[0] + 1   # steps=1 if interval is [0, ∞) otherwise steps=length of interval
+        self.operation = None
+        # Matrices that shift a vector and add a new entry at the end.
+        self.M = torch.diag(torch.ones(self.hidden_dim-1, device=device), diagonal=1)
+        self.b = torch.zeros(self.hidden_dim, device=device)
+        self.b[-1] = 1.
+        # self.b = self.b.at[-1].set(1)
+
+
+    def _cell(self, x, hidden_state, time_dim=1, **kwargs):
+        """
+        This function describes the operation that takes place at each recurrent step.
+        Args:
+            x: the input state at time t [batch_size, 1, ...]
+            hidden_state: the hidden state. It is either a tensor, or a tuple of tensors, depending on the interval chosen and other arguments. Generally, the hidden state is of size [batch_size, hidden_dim,...]
+
+        Return:
+            output and next hidden_state
+        """
+        raise NotImplementedError("_cell is not implemented")
+
+
+    def _run_cell(self, signal, time_dim=0, **kwargs):
+        """
+        Function to run a signal through a cell T times, where T is the length of the signal in the time dimension
+
+        Args:
+            signal: input signal, size = [time_dim,]
+            time_dim: axis corresponding to time_dim. Default: 0
+            kwargs: Other arguments including time_dim, approx_method, temperature
+
+        Return:
+            outputs: list of outputs
+            states: list of hidden_states
+        """
+        hidden_state = self._initialize_hidden_state(signal)                               # [hidden_dim]
+        outputs = []
+        states = []
+
+        signal_split = torch.split(signal, 1, time_dim)    # list of x at each time step
+        for i in range(signal.shape[time_dim]):
+            o, hidden_state = self._cell(signal_split[i], hidden_state, time_dim, **kwargs)
+            outputs.append(o)
+            states.append(hidden_state)
+        return outputs, states
+
+    def robustness_trace(self, signal, time_dim=0, **kwargs):
+        """
+        Function to compute robustness trace of a temporal STL formula
+        First, compute the robustness trace of the subformula, and use that as the input for the recurrent computation
+
+        Args:
+            signal: input signal, size = [bs, time_dim, ...]
+            time_dim: axis corresponding to time_dim. Default: 1
+            kwargs: Other arguments including time_dim, approx_method, temperature
+
+        Returns:
+            robustness_trace: torch.array. Same size as signal.
+        """
+
+        trace = self.subformula(signal, **kwargs)
+        outputs, _ = self._run_cell(trace, time_dim, **kwargs)
+        return torch.concatenate(outputs, axis=time_dim)                              # [time_dim, ]
+
+    def _next_function(self):
+        """ next function is the input subformula. For visualization purposes """
+        return [self.subformula]
+
+
+class AlwaysRecurrent(Temporal_Operator):
+    """
+    The Always STL formula □_[a,b] subformula
+    The robustness value is the minimum value of the input trace over a prespecified time interval
+
+    Args:
+        subformula: subformula that the Always operation is applied on
+        interval: time interval [a,b] where a, b are indices along the time dimension. It is up to the user to keep track of what the timestep size is.
+    """
+    def __init__(self, subformula, interval=None):
+        super().__init__(subformula=subformula, interval=interval)
+        self.operation = Minish()
+
+
+    def _initialize_hidden_state(self, signal):
+        """
+        Compute the initial hidden state.
+
+        Args:
+            signal: the input signal. Expected size [time_dim,]
+
+        Returns:
+            h0: initial hidden state is [hidden_dim,]
+
+        Notes:
+        Initializing the hidden state requires padding on the signal. Currently, the default is to extend the last value.
+        TODO: have option on this padding
+
+        """
+        # Case 1, 2, 4
+        # TODO: make this less hard-coded. Assumes signal is [bs, time_dim, signal_dim], and already reversed
+        # pads with the signal value at the last time step.
+        h0 = torch.ones([self.hidden_dim, *signal.shape[1:]], device=self.device) * 1E3
+
+        # Case 3: if self.interval is [a, torch.inf), then the hidden state is a tuple (like in an LSTM)
+        if (self._interval[1] == torch.inf) & (self._interval[0] > 0):
+            c0 = signal[:1]
+            return (c0, h0)
+        return h0
+
+    def _cell(self, x, hidden_state, time_dim, **kwargs):
+        """
+        see Temporal_Operator._cell
+        """
+        # Case 1, interval = [0, inf]
+        if self.interval is None:
+            input_ = torch.concatenate([hidden_state, x], axis=time_dim)                # [rnn_dim+1,]
+            output = self.operation(input_, dim=time_dim, **kwargs)       # [1,]
+            return output, output
+
+        # Case 3: self.interval is [a, np.inf)
+        if (self._interval[1] == torch.inf) & (self._interval[0] > 0):
+            c, h = hidden_state
+            ch = torch.concatenate([c, h[:1]], axis=time_dim)                             # [2,]
+            output = self.operation(ch, dim=time_dim, **kwargs)               # [1,]
+            hidden_state_ = (output, self.M @ h + self.b * x)
+
+        # Case 2 and 4: self.interval is [a, b]
+        else:
+            hidden_state_ = self.M @ hidden_state + self.b * x
+            hx = torch.concatenate([hidden_state, x], axis=time_dim)                             # [rnn_dim+1,]
+            input_ = hx[:self.steps]                               # [self.steps,]
+            output = self.operation(input_, dim=time_dim, **kwargs)               # [1,]
+        return output, hidden_state_
+
+    def __str__(self):
+        return "◻ " + str(self._interval) + "( " + str(self.subformula) + " )"
+
+class EventuallyRecurrent(Temporal_Operator):
+    """
+    The Eventually STL formula □_[a,b] subformula
+    The robustness value is the minimum value of the input trace over a prespecified time interval
+
+    Args:
+        subformula: subformula that the Eventually operation is applied on
+        interval: time interval [a,b] where a, b are indices along the time dimension. It is up to the user to keep track of what the timestep size is.
+    """
+    def __init__(self, subformula, interval=None):
+        super().__init__(subformula=subformula, interval=interval)
+        self.operation = Maxish()
+
+
+    def _initialize_hidden_state(self, signal):
+        """
+        Compute the initial hidden state.
+
+        Args:
+            signal: the input signal. Expected size [time_dim,]
+
+        Returns:
+            h0: initial hidden state is [hidden_dim,]
+
+        Notes:
+        Initializing the hidden state requires padding on the signal. Currently, the default is to extend the last value.
+        TODO: have option on this padding
+
+        """
+        # Case 1, 2, 4
+        # TODO: make this less hard-coded. Assumes signal is [bs, time_dim, signal_dim], and already reversed
+        # pads with the signal value at the last time step.
+        h0 = torch.ones([self.hidden_dim, *signal.shape[1:]], device=self.device) * -1E3
+
+        # Case 3: if self.interval is [a, torch.inf), then the hidden state is a tuple (like in an LSTM)
+        if (self._interval[1] == torch.inf) & (self._interval[0] > 0):
+            c0 = signal[:1]
+            return (c0, h0)
+        return h0
+
+    def _cell(self, x, hidden_state, time_dim, **kwargs):
+        """
+        see Temporal_Operator._cell
+        """
+        # Case 1, interval = [0, inf]
+        if self.interval is None:
+            input_ = torch.concatenate([hidden_state, x], axis=time_dim)                # [rnn_dim+1,]
+            output = self.operation(input_, dim=time_dim, **kwargs)       # [1,]
+            return output, output
+
+        # Case 3: self.interval is [a, np.inf)
+        if (self._interval[1] == torch.inf) & (self._interval[0] > 0):
+            c, h = hidden_state
+            ch = torch.concatenate([c, h[:1]], axis=time_dim)                             # [2,]
+            output = self.operation(ch, dim=time_dim, **kwargs)               # [1,]
+            hidden_state_ = (output, self.M @ h + self.b * x)
+
+        # Case 2 and 4: self.interval is [a, b]
+        else:
+            hidden_state_ = self.M @ hidden_state + self.b * x
+            hx = torch.concatenate([hidden_state, x], axis=time_dim)                             # [rnn_dim+1,]
+            input_ = hx[:self.steps]                               # [self.steps,]
+            output = self.operation(input_, dim=time_dim, **kwargs)               # [1,]
+        return output, hidden_state_
+
+    def __str__(self):
+        return "♢ " + str(self._interval) + "( " + str(self.subformula) + " )"
 
 
 if __name__ == "__main__":

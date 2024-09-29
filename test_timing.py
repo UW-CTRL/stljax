@@ -38,6 +38,26 @@ if __name__ == "__main__":
     def grad_mask_jit(signal):
         return torch.vmap(torch.func.grad(foo_jit))(signal)
 
+
+    def goo(signal):
+        return recurrent(signal).mean()
+
+    def recurrent_(signal):
+        return torch.vmap(recurrent)(signal)
+
+    def grad_recurrent(signal):
+        return torch.vmap(torch.func.grad(goo))(signal)
+
+    @torch.jit.script
+    def goo_jit(signal):
+        return recurrent(signal).mean()
+
+    def recurrent_jit(signal):
+        return torch.vmap(goo_jit)(signal)
+
+    def grad_recurrent_jit(signal):
+        return torch.vmap(torch.func.grad(goo_jit))(signal)
+
     # Number of loops per run
     loops = 100
     # Number of runs
@@ -50,7 +70,7 @@ if __name__ == "__main__":
     data = {}
 
     # functions = ["mask_", "recurrent_", "grad_mask", "grad_recurrent", "mask_jit", "recurrent_jit", "grad_mask_jit", "grad_recurrent_jit"]
-    functions = ["mask_", "grad_mask", "mask_jit", "grad_mask_jit"]
+    functions = ["mask_", "grad_mask", "mask_jit", "grad_mask_jit", "recurrent_", "grad_recurrent", "recurrent_jit", "grad_recurrent_jit"]
     Ts = []
     data["functions"] = functions
     data["runs"] = runs
