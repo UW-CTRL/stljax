@@ -17,7 +17,7 @@ if __name__ == "__main__":
 
 
     mask = Always(GreaterThan('x', torch.tensor([0.])))
-    # recurrent = AlwaysRecurrent(pred_rev > 4, interval=interval)
+    recurrent = AlwaysRecurrent(GreaterThan('x', torch.tensor([0.])))
 
     def foo(signal):
         return mask(signal).mean()
