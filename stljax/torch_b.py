@@ -104,6 +104,7 @@ class And(STL_Formula):
         """
         Batched input handling: Assumes signal of shape [batch_size, time_dim, ...]
         """
+
         pre = self.subformula1(inputs[0].to(device))
         post = self.subformula2(inputs[1].to(device))
 
@@ -200,9 +201,24 @@ class trial(STL_Formula):
     def __init__(self, x_val, y_val):
         super().__init__()
         #self.always = Always(GreaterThan('x', torch.tensor([0.5], device=device)))
-        self.eventually_x = Eventually(GreaterThan('x', torch.tensor([x_val], device=device)))
-        self.eventually_y= Eventually(GreaterThan('y', torch.tensor([y_val], device=device)))
-        self.dis = And(self.eventually_x, self.eventually_y)
+        self.pred_x = GreaterThan('x', torch.tensor([0.0], device=device))
+        self.pred_y = GreaterThan('y', torch.tensor([0.0], device=device))
+        self.pred_x_ub = LessThan('x', torch.tensor([0.0], device=device))
+        self.pred_y_ub = LessThan('y', torch.tensor([0.0], device=device))
+        self.x_and = And(self.pred_x, self.pred_x_ub)
+        self.y_and = And(self.pred_y, self.pred_y_ub)
+        self.eventually_x = Eventually(self.x_and)
+        self.eventually_y = Eventually(self.y_and)
+        # self.dis = self.eventually_y
+        # self.dis_x = self.eventually_x
+        # self.eventually_y= Eventually(self.pred_y)
+        # self.eventually_x_ub = Eventually(self.pred_x_ub)
+        # self.eventually_y_ub = Eventually(self.pred_y_ub)
+        # self.first = And(self.eventually_x_ub, self.eventually_y_ub)
+        # self.second = And(self.eventually_x, self.eventually_y)
+        self.dis = self.eventually_x
+        self.dis_2 = self.eventually_y
+    
 
 
     def robustness_trace(self, signal:torch.Tensor, **kwargs)->torch.Tensor:
@@ -211,8 +227,11 @@ class trial(STL_Formula):
         """
         x = signal[:, :, 0]
         y = signal[:, :, 1]
-        final = self.dis([x,y])
-        return final
+        concatenated_1 = torch.stack([x, x], dim=0)
+        concatenated_2 = torch.stack([y, y], dim=0)
+        final = self.dis(concatenated_1)
+        final_2 = self.dis_2(concatenated_2)
+        return final,final_2
 
     def forward(self, signal:torch.Tensor, **kwargs)->torch.Tensor:
         return self.robustness_trace(signal, **kwargs)
@@ -221,10 +240,17 @@ if __name__ == "__main__":
     # Example input with batch_size=2, time_dim=6
     x = torch.tensor([[0.6, 0.3, 0.2, 0.5, 0.6, 0.7],
                       [0.4, 0.8, 0.1, 0.3, 0.2, 0.9]], device=device)
-    y = torch.tensor([[0.6, 0.3, 0.2, 0.5, 0.6, 0.7],
+    y = torch.tensor([[0.6, 0.9, 0.9, 0.9, 0.9, 0.7],
                       [0.4, 0.8, 0.1, 0.3, 0.2, 0.9]], device=device)
     stack = torch.stack([x, y], dim=-1)
     print(stack.shape)
     model = trial(0.5, 0.5)
-    y = model(stack)
-    print(y)
+    x1, x2 = model(stack)
+    scale = 10000.0  # Scale factor for smooth minimum approximation
+
+    # Stack x1 and x2 along a new dimension for logsumexp
+    stacked = torch.stack([-scale * x1, -scale * x2], dim=0)
+
+    # Apply logsumexp over the stacked tensors along the new dimension (dim=0)
+    smooth_min = -torch.logsumexp(stacked, dim=0) / scale
+
