@@ -1116,7 +1116,7 @@ class Eventually(STL_Formula):
         T = signal.shape[time_dim]
         mask_value = -large_number
         if self.interval is None:
-            interval = [0,T]
+            interval = [0,T-1]
         else:
             interval = self.interval
         signal_matrix = signal.reshape([T,1]) @ jnp.ones([1,T])
