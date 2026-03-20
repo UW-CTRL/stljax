@@ -953,7 +953,7 @@ class Always(STL_Formula):
         elif padding == "mean":
             pad_value = signal.mean(time_dim)
         else:
-            pad_value = -large_number
+            pad_value = mask_value
         signal_pad = jnp.concatenate([jnp.ones([interval[1], T]) * sign * pad_value, jnp.ones([1, T]) * pad_value], axis=time_dim)
         signal_padded = jnp.concatenate([signal_matrix, signal_pad], axis=time_dim)
         subsignal_mask = jnp.tril(jnp.ones([T + interval[1]+1,T]))
